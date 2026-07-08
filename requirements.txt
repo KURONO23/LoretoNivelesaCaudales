@@ -1,0 +1,13 @@
+numpy
+pandas
+xarray
+h5netcdf
+scipy
+pyarrow
+pyreadr
+geopandas
+fiona
+shapely
+google-api-python-client
+google-auth
+python-dotenv

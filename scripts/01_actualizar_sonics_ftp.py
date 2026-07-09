@@ -4,28 +4,67 @@ import io
 import json
 import os
 import re
-import argparse
+import sqlite3
+import tempfile
 from datetime import datetime
 from ftplib import FTP
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyreadr
 import xarray as xr
-import geopandas as gpd
-from dotenv import load_dotenv
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaIoBaseUpload
 
 
 # ============================================================
-# CONFIGURACIÓN GENERAL
+# TÍTULO:
+# Lectura de NetCDF SONICS desde FTP en memoria,
+# filtro por COMID desde GPKG y reemplazo de archivos en Google Drive
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+
+
+# ============================================================
+# LECTOR SIMPLE DE .env PARA USO LOCAL
+# En GitHub Actions se usan secrets, no .env.
+# ============================================================
+
+def load_local_env(env_path: Path) -> None:
+    """
+    Carga variables desde .env solo si existen.
+    No reemplaza variables ya existentes en el sistema.
+    """
+    if not env_path.exists():
+        return
+
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+
+            if not line or line.startswith("#"):
+                continue
+
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+load_local_env(BASE_DIR / ".env")
+
+
+# ============================================================
+# RUTAS Y VARIABLES
+# ============================================================
 
 GPKG_PATH = Path(
     os.getenv(
@@ -33,9 +72,6 @@ GPKG_PATH = Path(
         BASE_DIR / "Data" / "estaciones_hidrometricas_loreto_latlong_COMID_actualizado.gpkg"
     )
 )
-
-OUTPUT_DIR = BASE_DIR / "outputs"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 FTP_HOST = os.getenv("FTP_HOST", "").strip()
 FTP_USER = os.getenv("FTP_USER", "").strip()
@@ -48,7 +84,7 @@ GOOGLE_SERVICE_JSON_PATH = os.getenv("GOOGLE_SERVICE_JSON_PATH", "").strip()
 
 HIST_NAME = "hist_filtrado.parquet"
 FORE_NAME = "fore_filtrado.parquet"
-META_NAME = "meta_filtrado.json"
+META_NAME = "meta_filtrado.rds"
 ESTACIONES_NAME = "estaciones_filtradas.csv"
 
 
@@ -56,7 +92,7 @@ ESTACIONES_NAME = "estaciones_filtradas.csv"
 # VALIDACIÓN
 # ============================================================
 
-def require_env_ftp() -> None:
+def require_env() -> None:
     faltan = []
 
     if not FTP_HOST:
@@ -65,83 +101,130 @@ def require_env_ftp() -> None:
         faltan.append("FTP_USER")
     if not FTP_PASS:
         faltan.append("FTP_PASS")
-    if not FTP_DIR:
-        faltan.append("FTP_DIR")
+    if not DRIVE_FOLDER_ID:
+        faltan.append("DRIVE_FOLDER_ID")
+    if not GOOGLE_SERVICE_JSON and not GOOGLE_SERVICE_JSON_PATH:
+        faltan.append("GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH")
 
     if faltan:
-        raise RuntimeError(f"Faltan variables FTP en .env: {', '.join(faltan)}")
+        raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltan)}")
 
     if not GPKG_PATH.exists():
         raise FileNotFoundError(f"No existe el GPKG: {GPKG_PATH}")
 
 
-def require_env_drive() -> None:
-    faltan = []
-
-    if not DRIVE_FOLDER_ID:
-        faltan.append("DRIVE_FOLDER_ID")
-
-    if not GOOGLE_SERVICE_JSON and not GOOGLE_SERVICE_JSON_PATH:
-        faltan.append("GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH")
-
-    if faltan:
-        raise RuntimeError(f"Faltan variables Drive en .env: {', '.join(faltan)}")
-
-    if GOOGLE_SERVICE_JSON_PATH:
-        ruta = Path(GOOGLE_SERVICE_JSON_PATH)
-        if not ruta.exists():
-            raise FileNotFoundError(f"No existe GOOGLE_SERVICE_JSON_PATH: {ruta}")
-
-
 # ============================================================
-# LECTURA DE GPKG
+# GPKG - LECTURA SIN GEOPANDAS
 # ============================================================
 
-def leer_estaciones_gpkg(gpkg_path: Path) -> gpd.GeoDataFrame:
-    print("Leyendo estaciones desde GPKG...")
+def quote_sql_identifier(name: str) -> str:
+    """
+    Protege nombres de tabla/campo para consultas SQLite.
+    """
+    return '"' + name.replace('"', '""') + '"'
 
-    gdf = gpd.read_file(gpkg_path)
 
-    gdf.columns = [str(c).strip().lower() for c in gdf.columns]
+def find_table_with_comid(gpkg_path: Path) -> tuple[str, list[str]]:
+    """
+    Busca automáticamente una tabla dentro del GPKG que contenga
+    una columna llamada COMID.
+    """
+    conn = sqlite3.connect(str(gpkg_path))
 
-    if "comid" not in gdf.columns:
-        raise ValueError("El GPKG debe tener la columna COMID.")
+    try:
+        tables_df = pd.read_sql_query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            ORDER BY name
+            """,
+            conn
+        )
 
-    gdf["comid"] = pd.to_numeric(gdf["comid"], errors="coerce")
-    gdf = gdf.dropna(subset=["comid"]).copy()
-    gdf["comid"] = gdf["comid"].astype("int64")
+        tables = tables_df["name"].astype(str).tolist()
 
-    if gdf.empty:
+        excluded_prefixes = (
+            "gpkg_",
+            "sqlite_",
+            "rtree_",
+        )
+
+        for table in tables:
+            table_lower = table.lower()
+
+            if table_lower.startswith(excluded_prefixes):
+                continue
+
+            info = conn.execute(f"PRAGMA table_info({quote_sql_identifier(table)})").fetchall()
+            cols = [row[1] for row in info]
+            cols_lower = [c.lower() for c in cols]
+
+            if "comid" in cols_lower:
+                return table, cols
+
+        raise ValueError("No se encontró ninguna tabla del GPKG con columna COMID.")
+
+    finally:
+        conn.close()
+
+
+def read_stations_from_gpkg(gpkg_path: Path) -> pd.DataFrame:
+    """
+    Lee la tabla de estaciones del GPKG y devuelve un DataFrame
+    con al menos la columna comid.
+    """
+    table, cols = find_table_with_comid(gpkg_path)
+
+    conn = sqlite3.connect(str(gpkg_path))
+
+    try:
+        query = f"SELECT * FROM {quote_sql_identifier(table)}"
+        df = pd.read_sql_query(query, conn)
+
+    finally:
+        conn.close()
+
+    df.columns = [str(c).strip().lower() for c in df.columns]
+
+    if "comid" not in df.columns:
+        raise ValueError("La tabla encontrada no contiene la columna COMID.")
+
+    df["comid"] = pd.to_numeric(df["comid"], errors="coerce")
+    df = df.dropna(subset=["comid"]).copy()
+    df["comid"] = df["comid"].astype("int64")
+
+    if df.empty:
         raise ValueError("No se encontraron COMID válidos en el GPKG.")
 
-    print(f"Estaciones con COMID: {len(gdf)}")
-
-    return gdf
+    return df
 
 
-def obtener_comids(gdf: gpd.GeoDataFrame) -> np.ndarray:
-    comids = sorted(gdf["comid"].dropna().astype("int64").unique().tolist())
-    return np.array(comids, dtype="float64")
+def read_comids_from_gpkg(gpkg_path: Path) -> tuple[np.ndarray, pd.DataFrame]:
+    """
+    Devuelve:
+    - arreglo de COMID únicos
+    - tabla de estaciones para metadatos
+    """
+    stations_df = read_stations_from_gpkg(gpkg_path)
 
+    comids = (
+        stations_df["comid"]
+        .dropna()
+        .astype("int64")
+        .drop_duplicates()
+        .sort_values()
+        .to_numpy(dtype="float64")
+    )
 
-def guardar_estaciones_csv(gdf: gpd.GeoDataFrame) -> Path:
-    df = gdf.copy()
+    if len(comids) == 0:
+        raise ValueError("No se encontraron COMID válidos.")
 
-    if "geometry" in df.columns:
-        df["longitud"] = df.geometry.x
-        df["latitud"] = df.geometry.y
-        df = pd.DataFrame(df.drop(columns="geometry"))
-
-    salida = OUTPUT_DIR / ESTACIONES_NAME
-    df.to_csv(salida, index=False, encoding="utf-8-sig")
-
-    print(f"Estaciones guardadas: {salida}")
-
-    return salida
+    return comids, stations_df
 
 
 # ============================================================
-# FTP
+# FTP - MISMA LÓGICA BASE DE VILCANOTA
 # ============================================================
 
 def parse_ftp_modify(value: str | None) -> datetime | None:
@@ -169,6 +252,7 @@ def extract_ts_from_name(name: str) -> datetime | None:
 
     for patron in patrones:
         m = re.search(patron, name)
+
         if not m:
             continue
 
@@ -238,20 +322,16 @@ def choose_latest_nc(files: list[tuple[str, datetime | None]]) -> str:
 
 
 def read_latest_nc_bytes_from_ftp() -> tuple[bytes, str]:
-    print("Conectando al FTP SONICS...")
-
-    with FTP(FTP_HOST, timeout=120) as ftp:
+    """
+    Versión muy parecida a Vilcanota:
+    abre FTP, entra a carpeta, elige .nc reciente y lo lee en memoria.
+    """
+    with FTP(FTP_HOST) as ftp:
         ftp.login(FTP_USER, FTP_PASS)
         ftp.cwd(FTP_DIR)
 
         nc_files = list_nc_files(ftp)
-
-        print(f"Archivos .nc encontrados: {len(nc_files)}")
-
         latest_nc = choose_latest_nc(nc_files)
-
-        print(f"NetCDF más reciente seleccionado: {latest_nc}")
-        print("Leyendo NetCDF en memoria...")
 
         buffer = io.BytesIO()
         ftp.retrbinary(f"RETR {latest_nc}", buffer.write)
@@ -261,7 +341,7 @@ def read_latest_nc_bytes_from_ftp() -> tuple[bytes, str]:
 
 
 # ============================================================
-# NETCDF
+# NETCDF EN MEMORIA
 # ============================================================
 
 def orient_tc(arr: np.ndarray, n_t: int, n_c: int) -> np.ndarray:
@@ -309,18 +389,22 @@ def open_dataset_from_bytes(nc_bytes: bytes) -> tuple[xr.Dataset, str]:
     )
 
 
-def procesar_netcdf_filtrado(
+def build_filtered_payloads(
     nc_bytes: bytes,
     source_name: str,
     comid_objetivo: np.ndarray,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-
+    stations_df: pd.DataFrame,
+) -> dict[str, tuple[io.BytesIO, str]]:
+    """
+    Construye salidas en memoria:
+    - hist_filtrado.parquet
+    - fore_filtrado.parquet
+    - meta_filtrado.rds
+    - estaciones_filtradas.csv
+    """
     ds, engine_used = open_dataset_from_bytes(nc_bytes)
 
     try:
-        print("Variables disponibles en el NetCDF:")
-        print(list(ds.variables))
-
         comid_nc = pd.to_numeric(
             pd.Series(np.asarray(ds["comid"].values).ravel()),
             errors="coerce",
@@ -340,9 +424,6 @@ def procesar_netcdf_filtrado(
 
         comid_keep = comid_nc[idx_keep]
 
-        print(f"COMID del GPKG: {len(comid_objetivo)}")
-        print(f"COMID encontrados en NetCDF: {len(comid_keep)}")
-
         qr_hist = orient_tc(np.asarray(ds["qr_hist"].values), n_t, n_c)[:, idx_keep]
         qr_eta_eqm = orient_tc(np.asarray(ds["qr_eta_eqm"].values), n_f, n_c)[:, idx_keep]
         qr_eta_scal = orient_tc(np.asarray(ds["qr_eta_scal"].values), n_f, n_c)[:, idx_keep]
@@ -351,79 +432,131 @@ def procesar_netcdf_filtrado(
 
         hist_df = pd.DataFrame({
             "fecha": np.tile(time_hist.to_pydatetime(), len(comid_keep)),
-            "comid": np.repeat(comid_keep.astype("int64"), len(time_hist)),
+            "comid": np.repeat(comid_keep, len(time_hist)),
             "qr_hist": qr_hist.reshape(-1, order="F"),
-        })
-
-        hist_df = (
-            hist_df
-            .sort_values(["comid", "fecha"], kind="stable")
-            .reset_index(drop=True)
-        )
+        }).sort_values(["comid", "fecha"], kind="stable").reset_index(drop=True)
 
         fore_df = pd.DataFrame({
             "fecha": np.tile(time_frst.to_pydatetime(), len(comid_keep)),
-            "comid": np.repeat(comid_keep.astype("int64"), len(time_frst)),
+            "comid": np.repeat(comid_keep, len(time_frst)),
             "qr_eta_eqm": qr_eta_eqm.reshape(-1, order="F"),
             "qr_eta_scal": qr_eta_scal.reshape(-1, order="F"),
             "qr_gfs": qr_gfs.reshape(-1, order="F"),
             "qr_wrf": qr_wrf.reshape(-1, order="F"),
+        }).sort_values(["comid", "fecha"], kind="stable").reset_index(drop=True)
+
+        # ----------------------------------------------------
+        # HISTÓRICO PARQUET EN MEMORIA
+        # ----------------------------------------------------
+        hist_buf = io.BytesIO()
+        hist_df.to_parquet(hist_buf, index=False)
+        hist_buf.seek(0)
+
+        # ----------------------------------------------------
+        # FORECAST PARQUET EN MEMORIA
+        # ----------------------------------------------------
+        fore_buf = io.BytesIO()
+        fore_df.to_parquet(fore_buf, index=False)
+        fore_buf.seek(0)
+
+        # ----------------------------------------------------
+        # ESTACIONES CSV EN MEMORIA
+        # ----------------------------------------------------
+        estaciones_df = stations_df.copy()
+
+        # Evitar columnas geométricas binarias si existen en el GPKG
+        for col in list(estaciones_df.columns):
+            if col.lower() in ["geom", "geometry"]:
+                estaciones_df = estaciones_df.drop(columns=[col])
+
+        estaciones_buf = io.BytesIO()
+        estaciones_df.to_csv(estaciones_buf, index=False, encoding="utf-8-sig")
+        estaciones_buf.seek(0)
+
+        # ----------------------------------------------------
+        # METADATA RDS EN MEMORIA
+        # ----------------------------------------------------
+        estaciones_cols_preferidas = [
+            c for c in [
+                "estacion",
+                "nombre",
+                "cuenca",
+                "rio",
+                "comid",
+                "latitud",
+                "longitud"
+            ]
+            if c in estaciones_df.columns
+        ]
+
+        if estaciones_cols_preferidas:
+            estaciones_meta = estaciones_df[estaciones_cols_preferidas].copy()
+        else:
+            estaciones_meta = estaciones_df.copy()
+
+        meta_df = pd.DataFrame({
+            "comid_json": [
+                json.dumps(
+                    [float(x) for x in comid_keep.tolist()],
+                    ensure_ascii=False
+                )
+            ],
+            "estaciones_json": [
+                estaciones_meta.to_json(orient="records", force_ascii=False)
+            ],
+            "ult_fecha_hist": [
+                str(pd.to_datetime(time_hist).max().date())
+            ],
+            "fechas_hist_json": [
+                json.dumps(
+                    [str(pd.Timestamp(x).date()) for x in time_hist],
+                    ensure_ascii=False
+                )
+            ],
+            "fechas_fore_json": [
+                json.dumps(
+                    [str(pd.Timestamp(x).date()) for x in pd.to_datetime(time_frst).unique()],
+                    ensure_ascii=False
+                )
+            ],
+            "nc_origen": [
+                f"ftp://{FTP_HOST}/{FTP_DIR.strip('/')}/{source_name}"
+            ],
+            "nc_nombre": [source_name],
+            "engine_usado": [engine_used],
+            "n_comid": [int(len(comid_keep))],
+            "n_estaciones": [int(len(stations_df))],
+            "fecha_proceso": [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ],
         })
 
-        fore_df = (
-            fore_df
-            .sort_values(["comid", "fecha"], kind="stable")
-            .reset_index(drop=True)
-        )
+        with tempfile.NamedTemporaryFile(suffix=".rds", delete=False) as tmp:
+            tmp_rds = tmp.name
 
-        meta = {
-            "nc_nombre": source_name,
-            "nc_origen": f"ftp://{FTP_HOST}/{FTP_DIR.strip('/')}/{source_name}",
-            "engine_usado": engine_used,
-            "n_comid_gpkg": int(len(comid_objetivo)),
-            "n_comid_encontrados": int(len(comid_keep)),
-            "comid_encontrados": [int(x) for x in comid_keep.tolist()],
-            "ult_fecha_hist": str(pd.to_datetime(time_hist).max().date()),
-            "fechas_fore": [str(pd.Timestamp(x).date()) for x in pd.to_datetime(time_frst).unique()],
-            "fecha_proceso": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        try:
+            pyreadr.write_rds(tmp_rds, meta_df)
+
+            with open(tmp_rds, "rb") as f:
+                meta_buf = io.BytesIO(f.read())
+
+            meta_buf.seek(0)
+
+        finally:
+            try:
+                os.remove(tmp_rds)
+            except Exception:
+                pass
+
+        return {
+            HIST_NAME: (hist_buf, "application/octet-stream"),
+            FORE_NAME: (fore_buf, "application/octet-stream"),
+            META_NAME: (meta_buf, "application/octet-stream"),
+            ESTACIONES_NAME: (estaciones_buf, "text/csv"),
         }
-
-        return hist_df, fore_df, meta
 
     finally:
         ds.close()
-
-
-# ============================================================
-# GUARDADO LOCAL
-# ============================================================
-
-def guardar_salidas_locales(
-    hist_df: pd.DataFrame,
-    fore_df: pd.DataFrame,
-    meta: dict
-) -> dict[str, Path]:
-
-    hist_path = OUTPUT_DIR / HIST_NAME
-    fore_path = OUTPUT_DIR / FORE_NAME
-    meta_path = OUTPUT_DIR / META_NAME
-
-    hist_df.to_parquet(hist_path, index=False)
-    fore_df.to_parquet(fore_path, index=False)
-
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-
-    print("\nArchivos generados localmente:")
-    print(f" - {hist_path}")
-    print(f" - {fore_path}")
-    print(f" - {meta_path}")
-
-    return {
-        HIST_NAME: hist_path,
-        FORE_NAME: fore_path,
-        META_NAME: meta_path,
-    }
 
 
 # ============================================================
@@ -487,117 +620,89 @@ def find_file_in_folder_by_name(service, folder_id: str, filename: str) -> dict 
     return None
 
 
-def update_existing_drive_file(
+def upload_or_update_buffer(
     service,
     folder_id: str,
-    local_path: Path,
     drive_name: str,
+    buffer: io.BytesIO,
     mime_type: str
 ) -> None:
+    buffer.seek(0)
 
-    existing = find_file_in_folder_by_name(service, folder_id, drive_name)
-
-    if not existing:
-        print(f"NO ENCONTRADO EN DRIVE: {drive_name}")
-        print("Súbelo manualmente una vez a la carpeta Drive y vuelve a ejecutar.")
-        return
-
-    media = MediaFileUpload(
-        str(local_path),
+    media = MediaIoBaseUpload(
+        buffer,
         mimetype=mime_type,
         resumable=False
     )
 
-    service.files().update(
-        fileId=existing["id"],
-        media_body=media,
-        fields="id, name, modifiedTime",
-        supportsAllDrives=True
-    ).execute()
+    existing = find_file_in_folder_by_name(service, folder_id, drive_name)
 
-    print(f"Actualizado en Drive: {drive_name}")
+    if existing:
+        service.files().update(
+            fileId=existing["id"],
+            media_body=media,
+            fields="id,name",
+            supportsAllDrives=True
+        ).execute()
 
+        print(f"Actualizado en Drive: {drive_name}")
 
-def subir_salidas_a_drive(paths: dict[str, Path]) -> None:
-    require_env_drive()
+    else:
+        service.files().create(
+            body={
+                "name": drive_name,
+                "parents": [folder_id],
+            },
+            media_body=media,
+            fields="id,name",
+            supportsAllDrives=True
+        ).execute()
 
-    print("\nConectando a Google Drive...")
-    service = get_drive_service()
-
-    tipos = {
-        HIST_NAME: "application/octet-stream",
-        FORE_NAME: "application/octet-stream",
-        META_NAME: "application/json",
-        ESTACIONES_NAME: "text/csv",
-    }
-
-    for drive_name, local_path in paths.items():
-        update_existing_drive_file(
-            service=service,
-            folder_id=DRIVE_FOLDER_ID,
-            local_path=local_path,
-            drive_name=drive_name,
-            mime_type=tipos.get(drive_name, "application/octet-stream")
-        )
+        print(f"Creado en Drive: {drive_name}")
 
 
 # ============================================================
 # MAIN
 # ============================================================
 
-def main():
-    parser = argparse.ArgumentParser(description="Actualizar datos SONICS filtrados por COMID")
-    parser.add_argument(
-        "--solo-gpkg",
-        action="store_true",
-        help="Solo revisa el GPKG y no conecta al FTP"
-    )
-    parser.add_argument(
-        "--sin-drive",
-        action="store_true",
-        help="Procesa FTP y guarda localmente, pero no sube a Drive"
-    )
+def main() -> None:
+    require_env()
 
-    args = parser.parse_args()
+    print("Leyendo COMID del GPKG...")
+    comid_objetivo, stations_df = read_comids_from_gpkg(GPKG_PATH)
+    print(f"COMID válidos: {len(comid_objetivo)}")
 
-    print("=" * 80)
-    print("ACTUALIZADOR SONICS - LORETO")
-    print("=" * 80)
-
-    gdf = leer_estaciones_gpkg(GPKG_PATH)
-    comid_objetivo = obtener_comids(gdf)
-    estaciones_path = guardar_estaciones_csv(gdf)
-
-    print("\nCOMID objetivo:")
-    print(comid_objetivo.astype("int64").tolist())
-
-    if args.solo_gpkg:
-        print("\nModo solo GPKG. No se conectó al FTP.")
-        return
-
-    require_env_ftp()
-
+    print("Leyendo el .nc más reciente desde FTP a memoria...")
     nc_bytes, source_name = read_latest_nc_bytes_from_ftp()
+    print(f"NC leído en memoria: {source_name}")
 
-    hist_df, fore_df, meta = procesar_netcdf_filtrado(
+    print("Procesando NetCDF en memoria...")
+    payloads = build_filtered_payloads(
         nc_bytes=nc_bytes,
         source_name=source_name,
         comid_objetivo=comid_objetivo,
+        stations_df=stations_df,
     )
 
-    paths = guardar_salidas_locales(hist_df, fore_df, meta)
-    paths[ESTACIONES_NAME] = estaciones_path
+    print("Conectando a Google Drive...")
+    service = get_drive_service()
 
-    print("\nResumen final local:")
-    print(f"Histórico filtrado: {len(hist_df):,} filas")
-    print(f"Pronóstico filtrado: {len(fore_df):,} filas")
+    print("Actualizando archivos en la misma carpeta de Drive...")
+    for drive_name, (buffer, mime_type) in payloads.items():
+        upload_or_update_buffer(
+            service=service,
+            folder_id=DRIVE_FOLDER_ID,
+            drive_name=drive_name,
+            buffer=buffer,
+            mime_type=mime_type
+        )
 
-    if args.sin_drive:
-        print("\nModo sin Drive. No se subieron archivos.")
-    else:
-        subir_salidas_a_drive(paths)
-
-    print("\nProceso terminado correctamente.")
+    print("Proceso terminado correctamente.")
+    print("Resumen:")
+    print(" - FTP solo lectura")
+    print(" - NC nunca guardado en disco")
+    print(" - Salidas generadas en memoria")
+    print(f" - Archivos renovados en Drive: {', '.join(payloads.keys())}")
 
 
 if __name__ == "__main__":

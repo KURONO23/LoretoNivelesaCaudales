@@ -1,14 +1,12 @@
-name: Actualizar SONICS Loreto
+name: Actualizar datos Loreto
 
 on:
   workflow_dispatch:
-
   schedule:
-    # Corre todos los días a las 12:00 UTC, aprox. 7:00 a.m. Perú
-    - cron: "0 12 * * *"
+    - cron: "7 16 * * *"
 
 jobs:
-  actualizar-sonics:
+  actualizar:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,19 +21,16 @@ jobs:
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pandas numpy xarray pyarrow google-api-python-client google-auth google-auth-httplib2 h5netcdf h5py scipy pyreadr
 
-      - name: Ejecutar actualización SONICS
+      - name: Ejecutar actualización
         env:
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASS }}
           FTP_DIR: ${{ secrets.FTP_DIR }}
-
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GOOGLE_SERVICE_JSON: ${{ secrets.GOOGLE_SERVICE_JSON }}
-          GOOGLE_SERVICE_JSON_PATH: ""
-
           GPKG_PATH: Data/estaciones_hidrometricas_loreto_latlong_COMID_actualizado.gpkg
         run: |
           python scripts/01_actualizar_sonics_ftp.py

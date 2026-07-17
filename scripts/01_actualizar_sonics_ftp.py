@@ -551,8 +551,7 @@ def build_filtered_payloads(
         return {
             HIST_NAME: (hist_buf, "application/octet-stream"),
             FORE_NAME: (fore_buf, "application/octet-stream"),
-            META_NAME: (meta_buf, "application/octet-stream"),
-            ESTACIONES_NAME: (estaciones_buf, "text/csv"),
+            
         }
 
     finally:

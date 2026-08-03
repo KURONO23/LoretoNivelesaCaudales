@@ -54,6 +54,10 @@ jobs:
         run: |
           python scripts/04_exportar_pronostico_nivel_7dias.py
 
+      - name: Validar DWLT con observado disponible
+        run: |
+          python scripts/06_validar_dwlt_hasta_observado_disponible.py --dias 30
+
       - name: Guardar cache y salidas en el repositorio
         run: |
           git config user.name "github-actions"
@@ -71,10 +75,12 @@ jobs:
           git add -f outputs/metricas_dwlt_estaciones.xlsx
           git add -f outputs/pronostico_nivel_7dias_estaciones.xlsx
           git add -f outputs/pronostico_nivel_7dias_estaciones.csv
+          git add -f outputs/validacion_dwlt_hasta_observado_disponible.xlsx
+          git add -f outputs/validacion_dwlt_hasta_observado_disponible.csv
 
           if git diff --cached --quiet; then
             echo "No hay cambios en cache ni outputs."
           else
-            git commit -m "Actualizar cache, DWLT y pronostico Loreto"
+            git commit -m "Actualizar cache, DWLT, pronostico y validacion Loreto"
             git push
           fi

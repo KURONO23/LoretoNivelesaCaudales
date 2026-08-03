@@ -10,6 +10,10 @@ credentials*.json
 
 outputs/*
 !outputs/.gitkeep
+!outputs/hist_nivel_transformado.parquet
+!outputs/fore_nivel_transformado.parquet
+!outputs/metricas_dwlt_estaciones.parquet
+!outputs/metricas_dwlt_estaciones.xlsx
 
 *.nc
 *.parquet

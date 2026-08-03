@@ -26,7 +26,8 @@ from googleapiclient.http import MediaIoBaseUpload
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+CACHE_DIR = BASE_DIR / "backend" / "cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
 # LECTOR SIMPLE DE .env PARA USO LOCAL
@@ -79,8 +80,8 @@ FTP_PASS = os.getenv("FTP_PASS", "").strip()
 FTP_DIR = os.getenv("FTP_DIR", "/").strip()
 
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "").strip()
-GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
-GOOGLE_SERVICE_JSON_PATH = os.getenv("GOOGLE_SERVICE_JSON_PATH", "").strip()
+_SERVICE_JSON = os.getenv("_SERVICE_JSON", "").strip()
+_SERVICE_JSON_PATH = os.getenv("_SERVICE_JSON_PATH", "").strip()
 
 HIST_NAME = "hist_filtrado.parquet"
 FORE_NAME = "fore_filtrado.parquet"
@@ -103,8 +104,8 @@ def require_env() -> None:
         faltan.append("FTP_PASS")
     if not DRIVE_FOLDER_ID:
         faltan.append("DRIVE_FOLDER_ID")
-    if not GOOGLE_SERVICE_JSON and not GOOGLE_SERVICE_JSON_PATH:
-        faltan.append("GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH")
+    if not _SERVICE_JSON and not _SERVICE_JSON_PATH:
+        faltan.append("_SERVICE_JSON o _SERVICE_JSON_PATH")
 
     if faltan:
         raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltan)}")
@@ -557,7 +558,28 @@ def build_filtered_payloads(
     finally:
         ds.close()
 
+# ============================================================
+# GUARDAR COPIA EN backend/cache DEL REPOSITORIO
+# ============================================================
 
+def save_payloads_to_cache(payloads: dict[str, tuple[io.BytesIO, str]]) -> None:
+    """
+    Guarda en backend/cache una copia de los archivos generados en memoria.
+    Esto permite que GitHub Actions luego haga commit de los parquet al repositorio.
+    """
+    print("Guardando copia en backend/cache...")
+
+    for filename, (buffer, _) in payloads.items():
+        out_path = CACHE_DIR / filename
+
+        buffer.seek(0)
+
+        with open(out_path, "wb") as f:
+            f.write(buffer.read())
+
+        buffer.seek(0)
+
+        print(f"Guardado en cache: {out_path}")
 # ============================================================
 # GOOGLE DRIVE
 # ============================================================
@@ -683,6 +705,8 @@ def main() -> None:
         stations_df=stations_df,
     )
 
+    save_payloads_to_cache(payloads)
+    
     print("Conectando a Google Drive...")
     service = get_drive_service()
 

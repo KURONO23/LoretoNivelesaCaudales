@@ -77,7 +77,7 @@ def bias(obs, sim):
     if mask.sum() == 0:
         return np.nan
 
-    return float(np.mean(sim[mask] - obs[mask])))
+    return float(np.mean(sim[mask] - obs[mask]))
 
 
 def pearson_r(obs, sim):

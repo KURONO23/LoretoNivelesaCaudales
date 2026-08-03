@@ -41,13 +41,16 @@ jobs:
       - name: Ejecutar actualización observado HidroMet
         env:
           OBS_DRIVE_FOLDER_ID: ${{ secrets.OBS_DRIVE_FOLDER_ID }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GOOGLE_SERVICE_JSON: ${{ secrets.GOOGLE_SERVICE_JSON }}
           GPKG_PATH: Data/estaciones_hidrometricas_loreto_latlong_COMID_actualizado.gpkg
         run: |
           python scripts/02_actualizar_observado_hidromet.py
 
-      - name: Guardar cache actualizado en el repositorio
+      - name: Ejecutar DWLT niveles
+        run: |
+          python scripts/03_dwlt_todas_estaciones.py
+
+      - name: Guardar cache y salidas en el repositorio
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -58,9 +61,15 @@ jobs:
           git add backend/cache/observado_estaciones.parquet
           git add backend/cache/observado_estaciones.csv
 
+          git add outputs/.gitkeep
+          git add outputs/hist_nivel_transformado.parquet
+          git add outputs/fore_nivel_transformado.parquet
+          git add outputs/metricas_dwlt_estaciones.parquet
+          git add outputs/metricas_dwlt_estaciones.xlsx
+
           if git diff --cached --quiet; then
-            echo "No hay cambios en backend/cache."
+            echo "No hay cambios en cache ni outputs."
           else
-            git commit -m "Actualizar cache SONICS y observado Loreto"
+            git commit -m "Actualizar cache y resultados DWLT Loreto"
             git push
           fi

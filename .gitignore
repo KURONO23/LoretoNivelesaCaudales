@@ -18,3 +18,8 @@ outputs/*
 *.log
 
 .ipynb_checkpoints/
+# Permitir cache SONICS para backend automático
+!backend/cache/
+!backend/cache/.gitkeep
+!backend/cache/hist_filtrado.parquet
+!backend/cache/fore_filtrado.parquet

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import calendar
-import io
 import json
 import os
 import re
@@ -11,7 +10,6 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import requests
 from google.oauth2 import service_account
@@ -25,8 +23,9 @@ from urllib3.util.retry import Retry
 # ACTUALIZACIÓN OBSERVADA HIDROMET DESDE GOOGLE DRIVE
 # ============================================================
 # Lee Excel por estación desde Drive, actualiza con WebService
-# HidroMet, vuelve a subir los Excel actualizados a Drive,
-# genera observado_estaciones.parquet y lo guarda en backend/cache.
+# HidroMet, actualiza Excel existentes en Drive y genera:
+# backend/cache/observado_estaciones.parquet
+# backend/cache/observado_estaciones.csv
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,8 +43,6 @@ GPKG_PATH = Path(
 )
 
 OBS_DRIVE_FOLDER_ID = os.getenv("OBS_DRIVE_FOLDER_ID", "").strip()
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "").strip()
-
 GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
 GOOGLE_SERVICE_JSON_PATH = os.getenv("GOOGLE_SERVICE_JSON_PATH", "").strip()
 
@@ -190,6 +187,10 @@ def subir_o_actualizar_archivo(
     mime_type: str,
     crear_si_no_existe: bool = False,
 ) -> None:
+    """
+    Por defecto NO crea archivos nuevos en Drive para evitar error de cuota
+    de Service Account. Solo actualiza si el archivo ya existe.
+    """
     existente = buscar_archivo_por_nombre(service, folder_id, drive_name)
 
     if not existente and not crear_si_no_existe:
@@ -224,6 +225,7 @@ def subir_o_actualizar_archivo(
         ).execute()
 
         print(f"Creado en Drive: {drive_name}")
+
 
 # ============================================================
 # HTTP HIDROMET
@@ -570,7 +572,10 @@ def unir_y_limpiar(df_antiguo, df_nuevo):
     return df_final
 
 
-def preparar_observado_parquet(df_total: pd.DataFrame, mapa_comid: dict[str, int]) -> pd.DataFrame:
+def preparar_observado_parquet(
+    df_total: pd.DataFrame,
+    mapa_comid: dict[str, int],
+) -> pd.DataFrame:
     df = df_total.copy()
 
     df.columns = [str(c).strip().upper() for c in df.columns]
@@ -674,7 +679,7 @@ def main() -> None:
                     destino=local_xlsx,
                 )
             else:
-                print(f"No existe en Drive. Se creará: {nombre_xlsx}")
+                print(f"No existe en Drive. Se trabajará desde cero: {nombre_xlsx}")
 
             df_existente, ultima_fecha = leer_excel_estacion(local_xlsx)
 
@@ -791,7 +796,7 @@ def main() -> None:
             # Guardar Excel actualizado local temporal.
             df_final.to_excel(local_xlsx, index=False)
 
-            # Subir o actualizar Excel en Drive.
+            # Actualizar Excel en Drive solo si ya existe.
             subir_o_actualizar_archivo(
                 service=service,
                 folder_id=OBS_DRIVE_FOLDER_ID,
@@ -822,15 +827,15 @@ def main() -> None:
         consolidado_xlsx = tmpdir / CONSOLIDADO_NAME
         log_xlsx = tmpdir / LOG_NAME
 
-       if len(df_total) <= 1_048_000:
+        if len(df_total) <= 1_048_000:
             df_total.to_excel(consolidado_xlsx, index=False)
-                print(f"Consolidado temporal generado: {consolidado_xlsx}")
-            
-            df_log = pd.DataFrame(logs)
-            df_log.to_excel(log_xlsx, index=False)
-            print(f"Log temporal generado: {log_xlsx}")
-            
-            print("No se suben CONSOLIDADO ni LOG a Drive para evitar error de cuota de Service Account.")
+            print(f"Consolidado temporal generado: {consolidado_xlsx}")
+
+        df_log = pd.DataFrame(logs)
+        df_log.to_excel(log_xlsx, index=False)
+        print(f"Log temporal generado: {log_xlsx}")
+
+        print("No se suben CONSOLIDADO ni LOG a Drive para evitar error de cuota de Service Account.")
 
         observado = preparar_observado_parquet(
             df_total=df_total,
@@ -853,12 +858,10 @@ def main() -> None:
         print(f"Fecha mínima: {observado['fecha'].min()}")
         print(f"Fecha máxima: {observado['fecha'].max()}")
 
-        # Subir parquet y CSV observado también a la carpeta Drive principal.
-        folder_destino_obs = DRIVE_FOLDER_ID or OBS_DRIVE_FOLDER_ID
-
         print("No se sube observado_estaciones a Drive.")
         print("El observado actualizado queda guardado en backend/cache para commit en GitHub.")
-        print("\nProceso terminado correctamente.")
+
+    print("\nProceso terminado correctamente.")
 
 
 if __name__ == "__main__":

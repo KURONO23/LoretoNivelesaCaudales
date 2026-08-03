@@ -16,3 +16,5 @@ requests
 openpyxl
 streamlit
 plotly
+folium
+streamlit-folium

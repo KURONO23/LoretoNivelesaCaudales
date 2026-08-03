@@ -80,8 +80,8 @@ FTP_PASS = os.getenv("FTP_PASS", "").strip()
 FTP_DIR = os.getenv("FTP_DIR", "/").strip()
 
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "").strip()
-_SERVICE_JSON = os.getenv("_SERVICE_JSON", "").strip()
-_SERVICE_JSON_PATH = os.getenv("_SERVICE_JSON_PATH", "").strip()
+GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
+GOOGLE_SERVICE_JSON_PATH = os.getenv("GOOGLE_SERVICE_JSON_PATH", "").strip()
 
 HIST_NAME = "hist_filtrado.parquet"
 FORE_NAME = "fore_filtrado.parquet"
@@ -105,7 +105,7 @@ def require_env() -> None:
     if not DRIVE_FOLDER_ID:
         faltan.append("DRIVE_FOLDER_ID")
     if not _SERVICE_JSON and not _SERVICE_JSON_PATH:
-        faltan.append("_SERVICE_JSON o _SERVICE_JSON_PATH")
+        faltan.append("GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH")
 
     if faltan:
         raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltan)}")

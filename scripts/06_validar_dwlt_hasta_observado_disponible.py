@@ -11,15 +11,16 @@ import pandas as pd
 # CONFIGURACIÓN
 # ============================================================
 
-BASE_DIR = Path(r"C:\Users\mgutierrez\Documents\POI-MAX\POI 2026\NivelaCaudal")
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 OUTPUT_DIR = BASE_DIR / "outputs"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 CACHE_DIR = BASE_DIR / "backend" / "cache"
 
 HIST_DWLT_FILE = OUTPUT_DIR / "hist_nivel_transformado.parquet"
 FORE_DWLT_FILE = OUTPUT_DIR / "fore_nivel_transformado.parquet"
 
-OBS_FILE_OUTPUTS = OUTPUT_DIR / "observado_estaciones.parquet"
 OBS_FILE_CACHE = CACHE_DIR / "observado_estaciones.parquet"
 
 METRICAS_DWLT_FILE = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
@@ -38,15 +39,9 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def escoger_observado_file() -> Path:
-    if OBS_FILE_OUTPUTS.exists():
-        return OBS_FILE_OUTPUTS
-    if OBS_FILE_CACHE.exists():
-        return OBS_FILE_CACHE
-
-    raise FileNotFoundError(
-        "No se encontró observado_estaciones.parquet ni en outputs ni en backend/cache."
-    )
+def require_file(path: Path) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"No existe el archivo requerido: {path}")
 
 
 def rmse(obs, sim):
@@ -82,7 +77,7 @@ def bias(obs, sim):
     if mask.sum() == 0:
         return np.nan
 
-    return float(np.mean(sim[mask] - obs[mask]))
+    return float(np.mean(sim[mask] - obs[mask])))
 
 
 def pearson_r(obs, sim):
@@ -179,8 +174,7 @@ def clasificar_calidad(kge, rmse_m):
 # ============================================================
 
 def cargar_historico_dwlt() -> pd.DataFrame:
-    if not HIST_DWLT_FILE.exists():
-        raise FileNotFoundError(f"No existe: {HIST_DWLT_FILE}")
+    require_file(HIST_DWLT_FILE)
 
     df = pd.read_parquet(HIST_DWLT_FILE)
     df = normalizar_columnas(df)
@@ -192,11 +186,8 @@ def cargar_historico_dwlt() -> pd.DataFrame:
     if "estacion" not in df.columns:
         df["estacion"] = "SIN_NOMBRE"
 
-    # ============================================================
-    # CORRECCIÓN:
-    # hist_nivel_transformado.parquet ya puede traer observado.
-    # Lo eliminamos para volver a cruzarlo limpiamente con el parquet observado.
-    # ============================================================
+    # El histórico transformado puede traer observado incluido.
+    # Lo quitamos para volver a cruzar limpio con el parquet observado actualizado.
     columnas_observadas_previas = [
         "nivel_observado_m",
         "estacion_observada",
@@ -214,9 +205,9 @@ def cargar_historico_dwlt() -> pd.DataFrame:
 
 
 def cargar_observado() -> tuple[pd.DataFrame, Path]:
-    obs_path = escoger_observado_file()
+    require_file(OBS_FILE_CACHE)
 
-    df = pd.read_parquet(obs_path)
+    df = pd.read_parquet(OBS_FILE_CACHE)
     df = normalizar_columnas(df)
 
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
@@ -239,7 +230,7 @@ def cargar_observado() -> tuple[pd.DataFrame, Path]:
         .reset_index()
     )
 
-    return obs_diario, obs_path
+    return obs_diario, OBS_FILE_CACHE
 
 
 def cargar_metricas_historicas() -> pd.DataFrame:
@@ -312,10 +303,9 @@ def construir_validacion_reciente(
 
         return comp.sort_values(["estacion", "comid", "fecha"]).reset_index(drop=True)
 
-    # Si no se pasa rango manual, se toma la última ventana disponible por estación.
     partes = []
 
-    for comid, g in comp.groupby("comid", dropna=False):
+    for _, g in comp.groupby("comid", dropna=False):
         g = g.sort_values("fecha").copy()
 
         fecha_max = g["fecha"].max()
@@ -401,7 +391,6 @@ def resumen_por_estacion(valid: pd.DataFrame, metricas_hist: pd.DataFrame) -> pd
 
     resumen = pd.DataFrame(filas)
 
-    # Agregar métricas históricas completas si existen
     if not metricas_hist.empty and "comid" in metricas_hist.columns:
         cols = [
             "comid",
@@ -411,6 +400,7 @@ def resumen_por_estacion(valid: pd.DataFrame, metricas_hist: pd.DataFrame) -> pd
             "kge_2009",
             "rmse_m",
         ]
+
         cols = [c for c in cols if c in metricas_hist.columns]
 
         met = metricas_hist[cols].copy()
@@ -431,7 +421,10 @@ def resumen_por_estacion(valid: pd.DataFrame, metricas_hist: pd.DataFrame) -> pd
     return resumen.sort_values(["calidad_validacion_reciente", "estacion"]).reset_index(drop=True)
 
 
-def resumen_pronostico_actual(fore: pd.DataFrame, resumen_validacion: pd.DataFrame) -> pd.DataFrame:
+def resumen_pronostico_actual(
+    fore: pd.DataFrame,
+    resumen_validacion: pd.DataFrame,
+) -> pd.DataFrame:
     if fore.empty:
         return pd.DataFrame()
 
@@ -457,7 +450,9 @@ def resumen_pronostico_actual(fore: pd.DataFrame, resumen_validacion: pd.DataFra
         resumen_fore["nivel_fin_forecast_m"] - resumen_fore["nivel_inicio_forecast_m"]
     )
 
-    resumen_fore["tendencia_forecast"] = resumen_fore["tendencia_forecast_m"].apply(clasificar_tendencia)
+    resumen_fore["tendencia_forecast"] = resumen_fore["tendencia_forecast_m"].apply(
+        clasificar_tendencia
+    )
 
     cols_valid = [
         "comid",
@@ -494,6 +489,16 @@ def resumen_pronostico_actual(fore: pd.DataFrame, resumen_validacion: pd.DataFra
 # EXPORTACIÓN
 # ============================================================
 
+def convertir_fechas_texto(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].dt.strftime("%d/%m/%Y")
+
+    return df
+
+
 def exportar(
     valid: pd.DataFrame,
     resumen_estaciones: pd.DataFrame,
@@ -503,14 +508,9 @@ def exportar(
     obs_path: Path,
     dias: int,
 ) -> None:
-    valid_export = valid.copy()
-    resumen_export = resumen_estaciones.copy()
-    forecast_export = resumen_forecast.copy()
-
-    for df in [valid_export, resumen_export, forecast_export]:
-        for col in df.columns:
-            if pd.api.types.is_datetime64_any_dtype(df[col]):
-                df[col] = df[col].dt.strftime("%d/%m/%Y")
+    valid_export = convertir_fechas_texto(valid)
+    resumen_export = convertir_fechas_texto(resumen_estaciones)
+    forecast_export = convertir_fechas_texto(resumen_forecast)
 
     valid_export.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
 
@@ -527,9 +527,7 @@ def exportar(
         "fecha_fin_observado": obs_diario["fecha"].max(),
     }])
 
-    for col in resumen_general.columns:
-        if pd.api.types.is_datetime64_any_dtype(resumen_general[col]):
-            resumen_general[col] = resumen_general[col].dt.strftime("%d/%m/%Y")
+    resumen_general = convertir_fechas_texto(resumen_general)
 
     with pd.ExcelWriter(OUT_XLSX, engine="openpyxl") as writer:
         resumen_general.to_excel(writer, sheet_name="resumen_general", index=False)
@@ -557,19 +555,19 @@ def main():
         "--dias",
         type=int,
         default=30,
-        help="Número de días recientes disponibles por estación. Por defecto: 30."
+        help="Número de días recientes disponibles por estación. Por defecto: 30.",
     )
 
     parser.add_argument(
         "--fecha-inicio",
         default=None,
-        help="Fecha inicial manual, ejemplo: 2026-06-01."
+        help="Fecha inicial manual, ejemplo: 2026-06-01.",
     )
 
     parser.add_argument(
         "--fecha-fin",
         default=None,
-        help="Fecha final manual, ejemplo: 2026-06-30."
+        help="Fecha final manual, ejemplo: 2026-06-30.",
     )
 
     args = parser.parse_args()
@@ -643,7 +641,7 @@ def main():
 
     cols_print = [c for c in cols_print if c in resumen_estaciones.columns]
 
-    if cols_print:
+    if cols_print and not resumen_estaciones.empty:
         print(resumen_estaciones[cols_print].to_string(index=False))
     else:
         print("No se generó resumen por estación.")

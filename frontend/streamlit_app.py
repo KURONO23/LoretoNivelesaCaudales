@@ -367,6 +367,8 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     if not requeridas.issubset(set(pron.columns)):
         return pd.DataFrame()
 
+    pron = pron.copy()
+
     for col in ["nivel_min_m", "nivel_prom_m", "nivel_max_m"]:
         if col in pron.columns:
             pron[col] = pd.to_numeric(pron[col], errors="coerce")
@@ -464,13 +466,15 @@ def crear_mapa_estaciones(
         lat = row.get("lat", None)
         lon = row.get("lon", None)
 
-        if pd.isna(lat) or pd.isna(lon):
+        if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
             continue
+
+        comid_int = int(comid)
 
         seleccionado = False
 
-        if pd.notna(comid_sel) and pd.notna(comid):
-            seleccionado = int(comid) == int(comid_sel)
+        if pd.notna(comid_sel):
+            seleccionado = comid_int == int(comid_sel)
         elif estacion == estacion_sel:
             seleccionado = True
 
@@ -479,9 +483,9 @@ def crear_mapa_estaciones(
 
         info_extra = ""
 
-        if not pron_resumen.empty and pd.notna(comid):
+        if not pron_resumen.empty:
             tmp = pron_resumen[
-                pd.to_numeric(pron_resumen["comid"], errors="coerce") == float(comid)
+                pd.to_numeric(pron_resumen["comid"], errors="coerce") == float(comid_int)
             ]
 
             if not tmp.empty:
@@ -495,15 +499,16 @@ def crear_mapa_estaciones(
 
         popup_html = f"""
         <b>{estacion}</b><br>
-        <b>COMID:</b> {comid}
+        <b>COMID:</b> {comid_int}
         {info_extra}
+        <br><br><i>Haz click para seleccionar esta estación.</i>
         """
 
         folium.CircleMarker(
             location=[lat, lon],
             radius=radio,
             popup=folium.Popup(popup_html, max_width=300),
-            tooltip=estacion,
+            tooltip=f"{estacion}||{comid_int}",
             color=color,
             fill=True,
             fill_opacity=0.85,
@@ -573,19 +578,62 @@ if faltantes:
 
 
 # ============================================================
-# SIDEBAR
+# RELACIÓN ESTACIÓN - COMID
 # ============================================================
 
 estaciones_disponibles = sorted(pron["estacion"].dropna().unique().tolist())
 
+tabla_estaciones_pron = (
+    pron[["estacion", "comid"]]
+    .dropna()
+    .drop_duplicates(subset=["estacion"])
+    .copy()
+)
+
+tabla_estaciones_pron["comid"] = pd.to_numeric(
+    tabla_estaciones_pron["comid"],
+    errors="coerce",
+)
+
+tabla_estaciones_pron = tabla_estaciones_pron.dropna(subset=["comid"]).copy()
+tabla_estaciones_pron["comid"] = tabla_estaciones_pron["comid"].astype("int64")
+
+estacion_a_comid = dict(
+    zip(tabla_estaciones_pron["estacion"], tabla_estaciones_pron["comid"])
+)
+
+comid_a_estacion = dict(
+    zip(tabla_estaciones_pron["comid"], tabla_estaciones_pron["estacion"])
+)
+
+if "estacion_sel" not in st.session_state:
+    st.session_state.estacion_sel = estaciones_disponibles[0]
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
 with st.sidebar:
     st.header("Filtros")
 
-    estacion_sel = st.selectbox(
+    index_actual = 0
+
+    if st.session_state.estacion_sel in estaciones_disponibles:
+        index_actual = estaciones_disponibles.index(st.session_state.estacion_sel)
+
+    estacion_sidebar = st.selectbox(
         "Estación",
         estaciones_disponibles,
-        index=0,
+        index=index_actual,
+        key="selector_estacion_sidebar",
     )
+
+    if estacion_sidebar != st.session_state.estacion_sel:
+        st.session_state.estacion_sel = estacion_sidebar
+        st.rerun()
+
+    estacion_sel = st.session_state.estacion_sel
 
     mostrar_tablas = st.checkbox("Mostrar tablas completas", value=False)
 
@@ -612,11 +660,15 @@ with st.sidebar:
 # FILTRO POR ESTACIÓN
 # ============================================================
 
+estacion_sel = st.session_state.estacion_sel
+
 pron_est = pron[pron["estacion"] == estacion_sel].copy()
 
 comid_sel = None
 
-if not pron_est.empty and "comid" in pron_est.columns:
+if estacion_sel in estacion_a_comid:
+    comid_sel = estacion_a_comid[estacion_sel]
+elif not pron_est.empty and "comid" in pron_est.columns:
     comid_sel = pron_est["comid"].dropna().iloc[0]
 
 metricas_est = pd.DataFrame()
@@ -683,12 +735,34 @@ with col_mapa:
         pron_resumen=pron_resumen,
     )
 
-    st_folium(
+    mapa_evento = st_folium(
         mapa,
         width=None,
         height=650,
-        returned_objects=[],
+        key="mapa_estaciones",
+        returned_objects=["last_object_clicked_tooltip"],
     )
+
+    tooltip_click = None
+
+    if mapa_evento:
+        tooltip_click = mapa_evento.get("last_object_clicked_tooltip")
+
+    if tooltip_click and "||" in tooltip_click:
+        _, comid_click = tooltip_click.split("||", 1)
+
+        try:
+            comid_click = int(float(comid_click))
+
+            if comid_click in comid_a_estacion:
+                nueva_estacion = comid_a_estacion[comid_click]
+
+                if nueva_estacion != st.session_state.estacion_sel:
+                    st.session_state.estacion_sel = nueva_estacion
+                    st.rerun()
+
+        except Exception:
+            pass
 
     st.markdown("**Leyenda**")
     st.markdown(

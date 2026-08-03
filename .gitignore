@@ -23,3 +23,5 @@ outputs/*
 !backend/cache/.gitkeep
 !backend/cache/hist_filtrado.parquet
 !backend/cache/fore_filtrado.parquet
+!backend/cache/observado_estaciones.parquet
+!backend/cache/observado_estaciones.csv

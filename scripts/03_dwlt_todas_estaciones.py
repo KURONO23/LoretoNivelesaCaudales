@@ -1,27 +1,25 @@
 from __future__ import annotations
 
-import json
 import os
+import sqlite3
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
 
 # ============================================================
 # CONFIGURACIÓN
 # ============================================================
 
-BASE_DIR = Path(r"C:\Users\mgutierrez\Documents\POI-MAX\POI 2026\NivelaCaudal")
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 CACHE_DIR = BASE_DIR / "backend" / "cache"
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-ESTACIONES_FILE = CACHE_DIR / "estaciones_filtradas.csv"
+GPKG_FILE = BASE_DIR / "Data" / "estaciones_hidrometricas_loreto_latlong_COMID_actualizado.gpkg"
+
 HIST_FILE = CACHE_DIR / "hist_filtrado.parquet"
 FORE_FILE = CACHE_DIR / "fore_filtrado.parquet"
 OBS_FILE = CACHE_DIR / "observado_estaciones.parquet"
@@ -31,50 +29,20 @@ OUT_FORE = OUTPUT_DIR / "fore_nivel_transformado.parquet"
 OUT_METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OUT_METRICAS_XLSX = OUTPUT_DIR / "metricas_dwlt_estaciones.xlsx"
 
-ENV_PATH = BASE_DIR / ".env"
-
 
 # ============================================================
-# CARGAR .ENV
-# ============================================================
-
-def load_local_env(env_path: Path) -> None:
-    if not env_path.exists():
-        return
-
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-
-            if not line or line.startswith("#"):
-                continue
-
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-
-load_local_env(ENV_PATH)
-
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "").strip()
-GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
-GOOGLE_SERVICE_JSON_PATH = os.getenv("GOOGLE_SERVICE_JSON_PATH", "").strip()
-
-
-# ============================================================
-# UTILIDADES
+# UTILIDADES GENERALES
 # ============================================================
 
 def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip().lower() for c in df.columns]
     return df
+
+
+def require_file(path: Path) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"No existe el archivo requerido: {path}")
 
 
 def get_nombre_estacion(row: pd.Series) -> str:
@@ -87,9 +55,82 @@ def get_nombre_estacion(row: pd.Series) -> str:
     return "SIN_NOMBRE"
 
 
-def require_file(path: Path) -> None:
-    if not path.exists():
-        raise FileNotFoundError(f"No existe el archivo requerido: {path}")
+# ============================================================
+# LECTURA DE GPKG SIN GEOPANDAS
+# ============================================================
+
+def quote_sql_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def find_table_with_comid(gpkg_path: Path) -> tuple[str, list[str]]:
+    conn = sqlite3.connect(str(gpkg_path))
+
+    try:
+        tables_df = pd.read_sql_query(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            ORDER BY name
+            """,
+            conn,
+        )
+
+        tables = tables_df["name"].astype(str).tolist()
+
+        excluded_prefixes = (
+            "gpkg_",
+            "sqlite_",
+            "rtree_",
+        )
+
+        for table in tables:
+            table_lower = table.lower()
+
+            if table_lower.startswith(excluded_prefixes):
+                continue
+
+            info = conn.execute(
+                f"PRAGMA table_info({quote_sql_identifier(table)})"
+            ).fetchall()
+
+            cols = [row[1] for row in info]
+            cols_lower = [c.lower() for c in cols]
+
+            if "comid" in cols_lower:
+                return table, cols
+
+        raise ValueError("No se encontró ninguna tabla del GPKG con columna COMID.")
+
+    finally:
+        conn.close()
+
+
+def leer_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
+    table, _ = find_table_with_comid(gpkg_path)
+
+    conn = sqlite3.connect(str(gpkg_path))
+
+    try:
+        query = f"SELECT * FROM {quote_sql_identifier(table)}"
+        df = pd.read_sql_query(query, conn)
+
+    finally:
+        conn.close()
+
+    df = normalizar_columnas(df)
+
+    if "comid" not in df.columns:
+        raise ValueError("El GPKG debe tener columna COMID.")
+
+    df["comid"] = pd.to_numeric(df["comid"], errors="coerce")
+    df = df.dropna(subset=["comid"]).copy()
+    df["comid"] = df["comid"].astype("int64")
+
+    df = df.drop_duplicates(subset=["comid"], keep="first").reset_index(drop=True)
+
+    return df
 
 
 # ============================================================
@@ -99,19 +140,37 @@ def require_file(path: Path) -> None:
 def rmse(obs, sim):
     obs = np.asarray(obs, dtype=float)
     sim = np.asarray(sim, dtype=float)
-    return np.sqrt(np.nanmean((sim - obs) ** 2))
+
+    mask = np.isfinite(obs) & np.isfinite(sim)
+
+    if mask.sum() == 0:
+        return np.nan
+
+    return float(np.sqrt(np.mean((sim[mask] - obs[mask]) ** 2)))
 
 
 def mae(obs, sim):
     obs = np.asarray(obs, dtype=float)
     sim = np.asarray(sim, dtype=float)
-    return np.nanmean(np.abs(sim - obs))
+
+    mask = np.isfinite(obs) & np.isfinite(sim)
+
+    if mask.sum() == 0:
+        return np.nan
+
+    return float(np.mean(np.abs(sim[mask] - obs[mask])))
 
 
 def bias(obs, sim):
     obs = np.asarray(obs, dtype=float)
     sim = np.asarray(sim, dtype=float)
-    return np.nanmean(sim - obs)
+
+    mask = np.isfinite(obs) & np.isfinite(sim)
+
+    if mask.sum() == 0:
+        return np.nan
+
+    return float(np.mean(sim[mask] - obs[mask]))
 
 
 def pearson_r(obs, sim):
@@ -123,7 +182,7 @@ def pearson_r(obs, sim):
     if mask.sum() < 3:
         return np.nan
 
-    return np.corrcoef(obs[mask], sim[mask])[0, 1]
+    return float(np.corrcoef(obs[mask], sim[mask])[0, 1])
 
 
 def nse(obs, sim):
@@ -143,7 +202,7 @@ def nse(obs, sim):
     if den == 0:
         return np.nan
 
-    return 1 - (np.sum((sim_m - obs_m) ** 2) / den)
+    return float(1 - (np.sum((sim_m - obs_m) ** 2) / den))
 
 
 def kge_2009(obs, sim):
@@ -166,7 +225,7 @@ def kge_2009(obs, sim):
     alpha = np.std(sim_m) / std_obs if std_obs != 0 else np.nan
     beta = np.mean(sim_m) / mean_obs if mean_obs != 0 else np.nan
 
-    return 1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2)
+    return float(1 - np.sqrt((r - 1) ** 2 + (alpha - 1) ** 2 + (beta - 1) ** 2))
 
 
 # ============================================================
@@ -241,7 +300,6 @@ def transformar_valor_dwlt(
     sim_mes = hist_sim_est.loc[hist_sim_est["mes"] == mes, "qr_hist"].to_numpy(dtype=float)
     obs_mes = obs_est.loc[obs_est["mes"] == mes, "nivel_m"].to_numpy(dtype=float)
 
-    # Requisito mínimo para no construir curvas pobres.
     if len(sim_mes) < 30 or len(obs_mes) < 30:
         return np.nan, np.nan
 
@@ -401,138 +459,6 @@ def calcular_metricas_estacion(
 
 
 # ============================================================
-# GOOGLE DRIVE
-# ============================================================
-
-def get_drive_service():
-    if not DRIVE_FOLDER_ID:
-        raise RuntimeError("Falta DRIVE_FOLDER_ID en .env.")
-
-    if not GOOGLE_SERVICE_JSON and not GOOGLE_SERVICE_JSON_PATH:
-        raise RuntimeError("Falta GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH en .env.")
-
-    scopes = ["https://www.googleapis.com/auth/drive"]
-
-    if GOOGLE_SERVICE_JSON:
-        info = json.loads(GOOGLE_SERVICE_JSON)
-    else:
-        json_path = Path(GOOGLE_SERVICE_JSON_PATH)
-
-        if not json_path.exists():
-            raise FileNotFoundError(f"No existe GOOGLE_SERVICE_JSON_PATH: {json_path}")
-
-        with open(json_path, "r", encoding="utf-8") as f:
-            info = json.load(f)
-
-    creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
-
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
-
-
-def listar_drive(service, folder_id: str) -> list[dict]:
-    q = f"'{folder_id}' in parents and trashed = false"
-
-    archivos = []
-    page_token = None
-
-    while True:
-        resp = service.files().list(
-            q=q,
-            spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, modifiedTime, size)",
-            pageSize=1000,
-            pageToken=page_token,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute()
-
-        archivos.extend(resp.get("files", []))
-        page_token = resp.get("nextPageToken")
-
-        if not page_token:
-            break
-
-    return archivos
-
-
-def buscar_drive(service, folder_id: str, nombre: str) -> dict | None:
-    archivos = listar_drive(service, folder_id)
-
-    for archivo in archivos:
-        if archivo["name"].lower() == nombre.lower():
-            return archivo
-
-    return None
-
-
-def subir_o_actualizar_drive(service, local_path: Path, drive_name: str, mime_type: str) -> None:
-    existente = buscar_drive(service, DRIVE_FOLDER_ID, drive_name)
-
-    media = MediaFileUpload(
-        str(local_path),
-        mimetype=mime_type,
-        resumable=False,
-    )
-
-    if existente:
-        service.files().update(
-            fileId=existente["id"],
-            media_body=media,
-            fields="id,name,modifiedTime",
-            supportsAllDrives=True,
-        ).execute()
-
-        print(f"Actualizado en Drive: {drive_name}")
-
-    else:
-        service.files().create(
-            body={
-                "name": drive_name,
-                "parents": [DRIVE_FOLDER_ID],
-            },
-            media_body=media,
-            fields="id,name",
-            supportsAllDrives=True,
-        ).execute()
-
-        print(f"Creado en Drive: {drive_name}")
-
-
-def subir_salidas_drive() -> None:
-    print("\nSubiendo salidas DWLT a Google Drive...")
-
-    service = get_drive_service()
-
-    subir_o_actualizar_drive(
-        service,
-        OUT_HIST,
-        "hist_nivel_transformado.parquet",
-        "application/octet-stream",
-    )
-
-    subir_o_actualizar_drive(
-        service,
-        OUT_FORE,
-        "fore_nivel_transformado.parquet",
-        "application/octet-stream",
-    )
-
-    subir_o_actualizar_drive(
-        service,
-        OUT_METRICAS_PARQUET,
-        "metricas_dwlt_estaciones.parquet",
-        "application/octet-stream",
-    )
-
-    subir_o_actualizar_drive(
-        service,
-        OUT_METRICAS_XLSX,
-        "metricas_dwlt_estaciones.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-
-# ============================================================
 # MAIN
 # ============================================================
 
@@ -541,13 +467,13 @@ def main():
     print("DWLT PARA TODAS LAS ESTACIONES - LORETO")
     print("=" * 100)
 
-    require_file(ESTACIONES_FILE)
+    require_file(GPKG_FILE)
     require_file(HIST_FILE)
     require_file(FORE_FILE)
     require_file(OBS_FILE)
 
     print("\nLeyendo archivos...")
-    estaciones = pd.read_csv(ESTACIONES_FILE)
+    estaciones = leer_estaciones_gpkg(GPKG_FILE)
     hist = pd.read_parquet(HIST_FILE)
     fore = pd.read_parquet(FORE_FILE)
     obs = pd.read_parquet(OBS_FILE)
@@ -557,7 +483,6 @@ def main():
     fore = normalizar_columnas(fore)
     obs = normalizar_columnas(obs)
 
-    # Normalizar tipos
     for df in [hist, fore, obs]:
         df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         df["comid"] = pd.to_numeric(df["comid"], errors="coerce").astype("Int64")
@@ -573,7 +498,6 @@ def main():
 
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
 
-    # Limpieza general
     hist = hist.dropna(subset=["fecha", "comid", "qr_hist"])
     hist = hist[hist["qr_hist"] > 0].copy()
 
@@ -585,7 +509,7 @@ def main():
     estaciones_validas = estaciones.dropna(subset=["comid"]).copy()
     estaciones_validas["comid"] = estaciones_validas["comid"].astype("int64")
 
-    print(f"Estaciones válidas: {len(estaciones_validas)}")
+    print(f"Estaciones válidas desde GPKG: {len(estaciones_validas)}")
     print(f"Histórico SONICS: {len(hist):,} registros")
     print(f"Pronóstico SONICS: {len(fore):,} registros")
     print(f"Observado nivel: {len(obs):,} registros")
@@ -708,12 +632,6 @@ def main():
 
     cols_show = [c for c in cols_show if c in metricas.columns]
     print(metricas[cols_show].to_string(index=False))
-
-    try:
-        subir_salidas_drive()
-    except Exception as e:
-        print(f"\nADVERTENCIA: no se pudo subir a Drive: {e}")
-        print("Los archivos locales sí fueron generados correctamente.")
 
     print("\nProceso terminado correctamente.")
 

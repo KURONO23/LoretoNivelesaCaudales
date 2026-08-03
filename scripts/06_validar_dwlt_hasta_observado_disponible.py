@@ -186,8 +186,6 @@ def cargar_historico_dwlt() -> pd.DataFrame:
     if "estacion" not in df.columns:
         df["estacion"] = "SIN_NOMBRE"
 
-    # El histórico transformado puede traer observado incluido.
-    # Lo quitamos para volver a cruzar limpio con el parquet observado actualizado.
     columnas_observadas_previas = [
         "nivel_observado_m",
         "estacion_observada",
@@ -336,12 +334,18 @@ def agregar_errores_y_tendencias(valid: pd.DataFrame) -> pd.DataFrame:
     valid["tendencia_obs"] = valid["delta_obs_m"].apply(clasificar_tendencia)
     valid["tendencia_dwlt"] = valid["delta_dwlt_m"].apply(clasificar_tendencia)
 
-    valid["coincide_tendencia"] = valid["tendencia_obs"] == valid["tendencia_dwlt"]
+    # Importante:
+    # Se convierte a object para permitir True / False / np.nan.
+    valid["coincide_tendencia"] = (
+        valid["tendencia_obs"] == valid["tendencia_dwlt"]
+    ).astype("object")
 
-    valid.loc[
-        valid["tendencia_obs"].eq("Sin dato") | valid["tendencia_dwlt"].eq("Sin dato"),
-        "coincide_tendencia",
-    ] = np.nan
+    mask_sin_dato = (
+        valid["tendencia_obs"].eq("Sin dato")
+        | valid["tendencia_dwlt"].eq("Sin dato")
+    )
+
+    valid.loc[mask_sin_dato, "coincide_tendencia"] = np.nan
 
     return valid
 

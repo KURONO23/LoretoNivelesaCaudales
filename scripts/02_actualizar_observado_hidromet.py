@@ -188,8 +188,13 @@ def subir_o_actualizar_archivo(
     local_path: Path,
     drive_name: str,
     mime_type: str,
+    crear_si_no_existe: bool = False,
 ) -> None:
     existente = buscar_archivo_por_nombre(service, folder_id, drive_name)
+
+    if not existente and not crear_si_no_existe:
+        print(f"No existe en Drive y no se creará por cuota: {drive_name}")
+        return
 
     media = MediaFileUpload(
         str(local_path),
@@ -219,7 +224,6 @@ def subir_o_actualizar_archivo(
         ).execute()
 
         print(f"Creado en Drive: {drive_name}")
-
 
 # ============================================================
 # HTTP HIDROMET

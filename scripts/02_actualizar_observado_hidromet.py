@@ -798,6 +798,7 @@ def main() -> None:
                 local_path=local_xlsx,
                 drive_name=nombre_xlsx,
                 mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                crear_si_no_existe=False,
             )
 
             if not df_final.empty:
@@ -821,27 +822,15 @@ def main() -> None:
         consolidado_xlsx = tmpdir / CONSOLIDADO_NAME
         log_xlsx = tmpdir / LOG_NAME
 
-        if len(df_total) <= 1_048_000:
+       if len(df_total) <= 1_048_000:
             df_total.to_excel(consolidado_xlsx, index=False)
-
-            subir_o_actualizar_archivo(
-                service=service,
-                folder_id=OBS_DRIVE_FOLDER_ID,
-                local_path=consolidado_xlsx,
-                drive_name=CONSOLIDADO_NAME,
-                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-        df_log = pd.DataFrame(logs)
-        df_log.to_excel(log_xlsx, index=False)
-
-        subir_o_actualizar_archivo(
-            service=service,
-            folder_id=OBS_DRIVE_FOLDER_ID,
-            local_path=log_xlsx,
-            drive_name=LOG_NAME,
-            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+                print(f"Consolidado temporal generado: {consolidado_xlsx}")
+            
+            df_log = pd.DataFrame(logs)
+            df_log.to_excel(log_xlsx, index=False)
+            print(f"Log temporal generado: {log_xlsx}")
+            
+            print("No se suben CONSOLIDADO ni LOG a Drive para evitar error de cuota de Service Account.")
 
         observado = preparar_observado_parquet(
             df_total=df_total,
@@ -867,23 +856,9 @@ def main() -> None:
         # Subir parquet y CSV observado también a la carpeta Drive principal.
         folder_destino_obs = DRIVE_FOLDER_ID or OBS_DRIVE_FOLDER_ID
 
-        subir_o_actualizar_archivo(
-            service=service,
-            folder_id=folder_destino_obs,
-            local_path=obs_parquet_path,
-            drive_name=OBS_PARQUET_NAME,
-            mime_type="application/octet-stream",
-        )
-
-        subir_o_actualizar_archivo(
-            service=service,
-            folder_id=folder_destino_obs,
-            local_path=obs_csv_path,
-            drive_name=OBS_CSV_NAME,
-            mime_type="text/csv",
-        )
-
-    print("\nProceso terminado correctamente.")
+        print("No se sube observado_estaciones a Drive.")
+        print("El observado actualizado queda guardado en backend/cache para commit en GitHub.")
+        print("\nProceso terminado correctamente.")
 
 
 if __name__ == "__main__":

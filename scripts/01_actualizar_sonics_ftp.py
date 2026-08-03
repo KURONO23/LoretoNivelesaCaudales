@@ -104,8 +104,8 @@ def require_env() -> None:
         faltan.append("FTP_PASS")
     if not DRIVE_FOLDER_ID:
         faltan.append("DRIVE_FOLDER_ID")
-    if not _SERVICE_JSON and not _SERVICE_JSON_PATH:
-        faltan.append("GOOGLE_SERVICE_JSON o GOOGLE_SERVICE_JSON_PATH")
+    if not GOOGLE_SERVICE_JSON and not GOOGLE_SERVICE_JSON_PATH:
+        faltan.append("GOOGLEGOOGLE_SERVICE_JSON o GOOGLEGOOGLE_SERVICE_JSON_PATH")
 
     if faltan:
         raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltan)}")

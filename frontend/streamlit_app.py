@@ -850,7 +850,7 @@ with col_panel:
                 )
             )
 
-   if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
+    if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
         fecha_corte = pd.to_datetime(fecha_inicio_pron)
 
         fig.add_shape(

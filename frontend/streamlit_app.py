@@ -850,14 +850,36 @@ with col_panel:
                 )
             )
 
-    if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
-        fig.add_vline(
-            x=fecha_inicio_pron,
-            line_width=2,
-            line_dash="dash",
-            line_color="gray",
-            annotation_text="Inicio pronóstico",
-            annotation_position="top",
+   if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
+        fecha_corte = pd.to_datetime(fecha_inicio_pron)
+
+        fig.add_shape(
+            type="line",
+            x0=fecha_corte,
+            x1=fecha_corte,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line=dict(
+                color="gray",
+                width=2,
+                dash="dash",
+            ),
+        )
+
+        fig.add_annotation(
+            x=fecha_corte,
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Inicio pronóstico",
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(
+                size=11,
+                color="gray",
+            ),
         )
 
     fig.update_layout(

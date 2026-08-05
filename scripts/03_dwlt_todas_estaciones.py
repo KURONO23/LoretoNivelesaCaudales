@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import os
 import sqlite3
 from pathlib import Path
 
@@ -29,13 +29,6 @@ OUT_FORE = OUTPUT_DIR / "fore_nivel_transformado.parquet"
 OUT_METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OUT_METRICAS_XLSX = OUTPUT_DIR / "metricas_dwlt_estaciones.xlsx"
 
-MIN_DATOS_MES_SIM = 30
-MIN_DATOS_MES_OBS = 30
-
-# Más parecido al correct_forecast original:
-# usa el mes del inicio del pronóstico para todo el horizonte.
-FORECAST_USA_MES_INICIO = True
-
 
 # ============================================================
 # UTILIDADES GENERALES
@@ -63,7 +56,7 @@ def get_nombre_estacion(row: pd.Series) -> str:
 
 
 # ============================================================
-# LECTURA GPKG SIN GEOPANDAS
+# LECTURA DE GPKG SIN GEOPANDAS
 # ============================================================
 
 def quote_sql_identifier(name: str) -> str:
@@ -85,10 +78,17 @@ def find_table_with_comid(gpkg_path: Path) -> tuple[str, list[str]]:
         )
 
         tables = tables_df["name"].astype(str).tolist()
-        excluded_prefixes = ("gpkg_", "sqlite_", "rtree_")
+
+        excluded_prefixes = (
+            "gpkg_",
+            "sqlite_",
+            "rtree_",
+        )
 
         for table in tables:
-            if table.lower().startswith(excluded_prefixes):
+            table_lower = table.lower()
+
+            if table_lower.startswith(excluded_prefixes):
                 continue
 
             info = conn.execute(
@@ -229,217 +229,84 @@ def kge_2009(obs, sim):
 
 
 # ============================================================
-# DWLT OPTIMIZADO: HISTOGRAMA + CDF MENSUAL
+# FUNCIONES DWLT
 # ============================================================
 
-def limpiar_serie(values) -> np.ndarray:
-    arr = np.asarray(values, dtype=float)
-    arr = arr[np.isfinite(arr)]
-    return arr
+def prob_no_excedencia(valor: float, serie_simulada: np.ndarray) -> float:
+    """
+    Calcula P(X <= valor), es decir la probabilidad de no excedencia.
+    """
 
+    serie = np.asarray(serie_simulada, dtype=float)
+    serie = serie[np.isfinite(serie)]
 
-def sturges_bins(n: int) -> int:
-    if n <= 1:
-        return 1
+    if len(serie) < 5:
+        return np.nan
 
-    return max(2, int(math.ceil(1 + math.log2(n))))
+    serie_ordenada = np.sort(serie)
 
+    probs = np.arange(1, len(serie_ordenada) + 1, dtype=float) / (len(serie_ordenada) + 1)
 
-def construir_cdf_histograma(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    values = limpiar_serie(values)
-
-    if len(values) < 5:
-        return np.array([]), np.array([])
-
-    vmin = np.nanmin(values)
-    vmax = np.nanmax(values)
-
-    if vmin == vmax:
-        x = np.array([vmin - 1e-9, vmin, vmax + 1e-9], dtype=float)
-        p = np.array([0.0, 0.5, 1.0], dtype=float)
-        return x, p
-
-    bins = sturges_bins(len(values))
-    counts, bin_edges = np.histogram(values, bins=bins)
-
-    if counts.sum() == 0:
-        return np.array([]), np.array([])
-
-    cdf = np.cumsum(counts).astype(float) / float(counts.sum())
-
-    x_points = np.concatenate(([bin_edges[0]], bin_edges[1:]))
-    p_points = np.concatenate(([0.0], cdf))
-
-    tmp = pd.DataFrame({
-        "x": x_points,
-        "p": p_points,
-    })
-
-    tmp = (
-        tmp.groupby("x", as_index=False)
-        .agg(p=("p", "max"))
-        .sort_values("x")
+    p = np.interp(
+        valor,
+        serie_ordenada,
+        probs,
+        left=probs[0],
+        right=probs[-1],
     )
 
-    return tmp["x"].to_numpy(dtype=float), tmp["p"].to_numpy(dtype=float)
+    return float(p)
 
 
-def preparar_inversa_cdf(x_points: np.ndarray, p_points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    tmp = pd.DataFrame({
-        "p": p_points,
-        "x": x_points,
-    })
+def nivel_equivalente(probabilidad: float, serie_nivel_observado: np.ndarray) -> float:
+    """
+    Obtiene el nivel observado asociado a la misma probabilidad de no excedencia.
+    """
 
-    tmp = (
-        tmp.groupby("p", as_index=False)
-        .agg(x=("x", "mean"))
-        .sort_values("p")
+    niveles = np.asarray(serie_nivel_observado, dtype=float)
+    niveles = niveles[np.isfinite(niveles)]
+
+    if len(niveles) < 5:
+        return np.nan
+
+    niveles_ordenados = np.sort(niveles)
+
+    probs = np.arange(1, len(niveles_ordenados) + 1, dtype=float) / (len(niveles_ordenados) + 1)
+
+    nivel = np.interp(
+        probabilidad,
+        probs,
+        niveles_ordenados,
+        left=niveles_ordenados[0],
+        right=niveles_ordenados[-1],
     )
 
-    return tmp["p"].to_numpy(dtype=float), tmp["x"].to_numpy(dtype=float)
+    return float(nivel)
 
 
-def interp_lineal_extrap(x, xp, fp, extrapolate: bool = False):
+def transformar_valor_dwlt(
+    caudal: float,
+    mes: int,
+    hist_sim_est: pd.DataFrame,
+    obs_est: pd.DataFrame,
+) -> tuple[float, float]:
     """
-    Interpolación vectorizada.
-    Si extrapolate=False, clipea fuera de rango.
-    Si extrapolate=True, extrapola linealmente en extremos.
-    """
-
-    x = np.asarray(x, dtype=float)
-    xp = np.asarray(xp, dtype=float)
-    fp = np.asarray(fp, dtype=float)
-
-    out = np.interp(x, xp, fp, left=fp[0], right=fp[-1])
-
-    if not extrapolate or len(xp) < 2:
-        return out
-
-    left_mask = x < xp[0]
-    right_mask = x > xp[-1]
-
-    if left_mask.any():
-        slope_left = (fp[1] - fp[0]) / (xp[1] - xp[0])
-        out[left_mask] = fp[0] + slope_left * (x[left_mask] - xp[0])
-
-    if right_mask.any():
-        slope_right = (fp[-1] - fp[-2]) / (xp[-1] - xp[-2])
-        out[right_mask] = fp[-1] + slope_right * (x[right_mask] - xp[-1])
-
-    return out
-
-
-def construir_curvas_mensuales(hist_sim_est: pd.DataFrame, obs_est: pd.DataFrame) -> dict[int, dict]:
-    """
-    Construye una sola vez las 12 curvas mensuales por estación.
-
-    Para cada mes guarda:
-    - caudal simulado -> probabilidad
-    - probabilidad -> nivel observado
+    Transforma un caudal SONICS a nivel de agua mediante DWLT mensual.
     """
 
-    curvas = {}
+    if pd.isna(caudal):
+        return np.nan, np.nan
 
-    for mes in range(1, 13):
-        sim_mes = hist_sim_est.loc[
-            hist_sim_est["mes"] == mes,
-            "qr_hist",
-        ].to_numpy(dtype=float)
+    sim_mes = hist_sim_est.loc[hist_sim_est["mes"] == mes, "qr_hist"].to_numpy(dtype=float)
+    obs_mes = obs_est.loc[obs_est["mes"] == mes, "nivel_m"].to_numpy(dtype=float)
 
-        obs_mes = obs_est.loc[
-            obs_est["mes"] == mes,
-            "nivel_m",
-        ].to_numpy(dtype=float)
+    if len(sim_mes) < 30 or len(obs_mes) < 30:
+        return np.nan, np.nan
 
-        sim_mes = limpiar_serie(sim_mes)
-        obs_mes = limpiar_serie(obs_mes)
+    p = prob_no_excedencia(float(caudal), sim_mes)
+    nivel = nivel_equivalente(p, obs_mes)
 
-        if len(sim_mes) < MIN_DATOS_MES_SIM or len(obs_mes) < MIN_DATOS_MES_OBS:
-            curvas[mes] = {
-                "ok": False,
-                "n_sim": len(sim_mes),
-                "n_obs": len(obs_mes),
-            }
-            continue
-
-        sim_x, sim_p = construir_cdf_histograma(sim_mes)
-        obs_x, obs_p = construir_cdf_histograma(obs_mes)
-        obs_p_inv, obs_x_inv = preparar_inversa_cdf(obs_x, obs_p)
-
-        if len(sim_x) < 2 or len(obs_p_inv) < 2:
-            curvas[mes] = {
-                "ok": False,
-                "n_sim": len(sim_mes),
-                "n_obs": len(obs_mes),
-            }
-            continue
-
-        curvas[mes] = {
-            "ok": True,
-            "n_sim": len(sim_mes),
-            "n_obs": len(obs_mes),
-            "sim_x": sim_x,
-            "sim_p": sim_p,
-            "obs_p": obs_p_inv,
-            "obs_x": obs_x_inv,
-        }
-
-    return curvas
-
-
-def transformar_array_dwlt(
-    caudales,
-    meses,
-    curvas: dict[int, dict],
-    extrapolate: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Transforma arrays completos de caudal a nivel usando curvas ya precalculadas.
-    """
-
-    caudales = np.asarray(caudales, dtype=float)
-    meses = np.asarray(meses, dtype=float)
-
-    niveles = np.full(len(caudales), np.nan, dtype=float)
-    probs = np.full(len(caudales), np.nan, dtype=float)
-
-    for mes in range(1, 13):
-        mask = (
-            np.isfinite(caudales)
-            & np.isfinite(meses)
-            & (meses.astype(float) == float(mes))
-        )
-
-        if not mask.any():
-            continue
-
-        curva = curvas.get(mes, {"ok": False})
-
-        if not curva.get("ok", False):
-            continue
-
-        q = caudales[mask]
-
-        p = interp_lineal_extrap(
-            x=q,
-            xp=curva["sim_x"],
-            fp=curva["sim_p"],
-            extrapolate=extrapolate,
-        )
-
-        p = np.clip(p, 0.0, 1.0)
-
-        h = interp_lineal_extrap(
-            x=p,
-            xp=curva["obs_p"],
-            fp=curva["obs_x"],
-            extrapolate=extrapolate,
-        )
-
-        probs[mask] = p
-        niveles[mask] = h
-
-    return niveles, probs
+    return nivel, p
 
 
 def transformar_historico_estacion(
@@ -447,22 +314,28 @@ def transformar_historico_estacion(
     estacion: str,
     hist_sim_est: pd.DataFrame,
     obs_est: pd.DataFrame,
-    curvas: dict[int, dict],
 ) -> pd.DataFrame:
-    out = hist_sim_est[["fecha", "comid", "mes", "qr_hist"]].copy()
-    out["estacion"] = estacion
-    out["mes_dwlt"] = out["mes"].astype(int)
+    filas = []
 
-    niveles, probs = transformar_array_dwlt(
-        caudales=out["qr_hist"].to_numpy(dtype=float),
-        meses=out["mes_dwlt"].to_numpy(dtype=float),
-        curvas=curvas,
-        extrapolate=False,
-    )
+    for _, row in hist_sim_est.iterrows():
+        nivel, p = transformar_valor_dwlt(
+            caudal=row["qr_hist"],
+            mes=int(row["mes"]),
+            hist_sim_est=hist_sim_est,
+            obs_est=obs_est,
+        )
 
-    out["prob_no_excedencia"] = probs
-    out["nivel_dwlt_m"] = niveles
-    out["metodo_dwlt"] = "histograma_cdf_mensual_optimizado"
+        filas.append({
+            "fecha": row["fecha"],
+            "comid": comid,
+            "estacion": estacion,
+            "mes": int(row["mes"]),
+            "qr_hist": row["qr_hist"],
+            "prob_no_excedencia": p,
+            "nivel_dwlt_m": nivel,
+        })
+
+    out = pd.DataFrame(filas)
 
     obs_diario = obs_est[["fecha", "nivel_m"]].copy()
     obs_diario = obs_diario.rename(columns={"nivel_m": "nivel_observado_m"})
@@ -476,19 +349,11 @@ def transformar_pronostico_estacion(
     comid: int,
     estacion: str,
     fore_est: pd.DataFrame,
-    curvas: dict[int, dict],
+    hist_sim_est: pd.DataFrame,
+    obs_est: pd.DataFrame,
 ) -> pd.DataFrame:
     out = fore_est.copy()
     out["estacion"] = estacion
-
-    if out.empty:
-        return out
-
-    if FORECAST_USA_MES_INICIO:
-        mes_inicio = int(pd.to_datetime(out["fecha"].min()).month)
-        out["mes_dwlt"] = mes_inicio
-    else:
-        out["mes_dwlt"] = out["mes"].astype(int)
 
     columnas_fore = ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]
 
@@ -496,12 +361,19 @@ def transformar_pronostico_estacion(
         if col not in out.columns:
             continue
 
-        niveles, probs = transformar_array_dwlt(
-            caudales=out[col].to_numpy(dtype=float),
-            meses=out["mes_dwlt"].to_numpy(dtype=float),
-            curvas=curvas,
-            extrapolate=True,
-        )
+        niveles = []
+        probs = []
+
+        for _, row in out.iterrows():
+            nivel, p = transformar_valor_dwlt(
+                caudal=row[col],
+                mes=int(row["mes"]),
+                hist_sim_est=hist_sim_est,
+                obs_est=obs_est,
+            )
+
+            niveles.append(nivel)
+            probs.append(p)
 
         sufijo = col.replace("qr_", "")
 
@@ -520,14 +392,8 @@ def transformar_pronostico_estacion(
         out["nivel_p75_m"] = out[nivel_cols].quantile(0.75, axis=1)
         out["nivel_max_m"] = out[nivel_cols].max(axis=1)
 
-    out["metodo_dwlt"] = "histograma_cdf_mensual_optimizado"
-
     return out.sort_values("fecha").reset_index(drop=True)
 
-
-# ============================================================
-# MÉTRICAS POR ESTACIÓN
-# ============================================================
 
 def calcular_metricas_estacion(
     comid: int,
@@ -536,21 +402,20 @@ def calcular_metricas_estacion(
     hist_sim_est: pd.DataFrame,
     obs_est: pd.DataFrame,
     fore_dwlt_est: pd.DataFrame,
-    curvas: dict[int, dict],
 ) -> dict:
     valid = hist_dwlt_est.dropna(subset=["nivel_observado_m", "nivel_dwlt_m"]).copy()
 
     if len(valid) >= 3:
-        obs_v = valid["nivel_observado_m"]
-        sim_v = valid["nivel_dwlt_m"]
+        obs = valid["nivel_observado_m"]
+        sim = valid["nivel_dwlt_m"]
 
         metricas = {
-            "bias_m": bias(obs_v, sim_v),
-            "mae_m": mae(obs_v, sim_v),
-            "rmse_m": rmse(obs_v, sim_v),
-            "r_pearson": pearson_r(obs_v, sim_v),
-            "nse": nse(obs_v, sim_v),
-            "kge_2009": kge_2009(obs_v, sim_v),
+            "bias_m": bias(obs, sim),
+            "mae_m": mae(obs, sim),
+            "rmse_m": rmse(obs, sim),
+            "r_pearson": pearson_r(obs, sim),
+            "nse": nse(obs, sim),
+            "kge_2009": kge_2009(obs, sim),
         }
     else:
         metricas = {
@@ -562,18 +427,13 @@ def calcular_metricas_estacion(
             "kge_2009": np.nan,
         }
 
-    meses_ok = [m for m, c in curvas.items() if c.get("ok", False)]
-
     out = {
         "estacion": estacion,
         "comid": comid,
-        "metodo_dwlt": "histograma_cdf_mensual_optimizado",
         "n_hist_sonics": int(len(hist_sim_est)),
         "n_obs_nivel": int(len(obs_est)),
         "n_fore_sonics": int(len(fore_dwlt_est)),
         "n_validacion": int(len(valid)),
-        "meses_curva_ok": ",".join([str(m) for m in meses_ok]),
-        "n_meses_curva_ok": int(len(meses_ok)),
         "fecha_inicio_validacion": valid["fecha"].min() if len(valid) else pd.NaT,
         "fecha_fin_validacion": valid["fecha"].max() if len(valid) else pd.NaT,
         "nivel_obs_min": valid["nivel_observado_m"].min() if len(valid) else np.nan,
@@ -605,7 +465,6 @@ def calcular_metricas_estacion(
 def main():
     print("=" * 100)
     print("DWLT PARA TODAS LAS ESTACIONES - LORETO")
-    print("MÉTODO: HISTOGRAMA + CDF MENSUAL OPTIMIZADO")
     print("=" * 100)
 
     require_file(GPKG_FILE)
@@ -631,28 +490,20 @@ def main():
 
     estaciones["comid"] = pd.to_numeric(estaciones["comid"], errors="coerce").astype("Int64")
 
-    if "qr_hist" not in hist.columns:
-        raise ValueError("hist_filtrado.parquet debe tener columna qr_hist.")
-
     hist["qr_hist"] = pd.to_numeric(hist["qr_hist"], errors="coerce")
 
     for col in ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]:
         if col in fore.columns:
             fore[col] = pd.to_numeric(fore[col], errors="coerce")
-            fore.loc[fore[col] <= 0, col] = np.nan
-
-    if "nivel_m" not in obs.columns:
-        raise ValueError("observado_estaciones.parquet debe tener columna nivel_m.")
 
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
 
-    # Limpieza de negativos, ceros y nulos.
-    hist = hist.dropna(subset=["fecha", "comid", "qr_hist", "mes"]).copy()
+    hist = hist.dropna(subset=["fecha", "comid", "qr_hist"])
     hist = hist[hist["qr_hist"] > 0].copy()
 
-    fore = fore.dropna(subset=["fecha", "comid", "mes"]).copy()
+    fore = fore.dropna(subset=["fecha", "comid"]).copy()
 
-    obs = obs.dropna(subset=["fecha", "comid", "nivel_m", "mes"]).copy()
+    obs = obs.dropna(subset=["fecha", "comid", "nivel_m"])
     obs = obs[obs["nivel_m"] > 0].copy()
 
     estaciones_validas = estaciones.dropna(subset=["comid"]).copy()
@@ -662,20 +513,17 @@ def main():
     print(f"Histórico SONICS: {len(hist):,} registros")
     print(f"Pronóstico SONICS: {len(fore):,} registros")
     print(f"Observado nivel: {len(obs):,} registros")
-    print(f"Forecast usa mes de inicio: {FORECAST_USA_MES_INICIO}")
 
     lista_hist_dwlt = []
     lista_fore_dwlt = []
     lista_metricas = []
-
-    total_est = len(estaciones_validas)
 
     for idx, (_, est_row) in enumerate(estaciones_validas.iterrows(), start=1):
         comid = int(est_row["comid"])
         estacion = get_nombre_estacion(est_row)
 
         print("\n" + "-" * 90)
-        print(f"[{idx}/{total_est}] Procesando {estacion} | COMID {comid}")
+        print(f"[{idx}/{len(estaciones_validas)}] Procesando {estacion} | COMID {comid}")
 
         hist_est = hist[hist["comid"] == comid].copy()
         fore_est = fore[fore["comid"] == comid].copy()
@@ -695,34 +543,19 @@ def main():
             print("  Saltando: sin pronóstico.")
             continue
 
-        print("  Construyendo curvas mensuales...")
-        curvas = construir_curvas_mensuales(
-            hist_sim_est=hist_est,
-            obs_est=obs_est,
-        )
-
-        meses_ok = [m for m, c in curvas.items() if c.get("ok", False)]
-        print(f"  Meses con curva válida: {meses_ok}")
-
-        if not meses_ok:
-            print("  Saltando: sin curvas mensuales válidas.")
-            continue
-
-        print("  Transformando histórico...")
         hist_dwlt_est = transformar_historico_estacion(
             comid=comid,
             estacion=estacion,
             hist_sim_est=hist_est,
             obs_est=obs_est,
-            curvas=curvas,
         )
 
-        print("  Transformando pronóstico...")
         fore_dwlt_est = transformar_pronostico_estacion(
             comid=comid,
             estacion=estacion,
             fore_est=fore_est,
-            curvas=curvas,
+            hist_sim_est=hist_est,
+            obs_est=obs_est,
         )
 
         metricas_est = calcular_metricas_estacion(
@@ -732,7 +565,6 @@ def main():
             hist_sim_est=hist_est,
             obs_est=obs_est,
             fore_dwlt_est=fore_dwlt_est,
-            curvas=curvas,
         )
 
         lista_hist_dwlt.append(hist_dwlt_est)
@@ -788,9 +620,7 @@ def main():
     cols_show = [
         "estacion",
         "comid",
-        "metodo_dwlt",
         "n_validacion",
-        "n_meses_curva_ok",
         "r_pearson",
         "nse",
         "kge_2009",
@@ -807,4 +637,3 @@ def main():
 
 
 if __name__ == "__main__":
-    main()

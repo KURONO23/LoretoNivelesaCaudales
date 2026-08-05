@@ -31,6 +31,8 @@ GPKG_FILE = DATA_DIR / "estaciones_hidrometricas_loreto_latlong_COMID_actualizad
 
 PRONOSTICO_CSV = OUTPUT_DIR / "pronostico_nivel_7dias_estaciones.csv"
 VALIDACION_CSV = OUTPUT_DIR / "validacion_dwlt_hasta_observado_disponible.csv"
+DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
+
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
@@ -147,27 +149,98 @@ def clasificar_calidad(kge) -> str:
     return "Revisar"
 
 
-def columna_existente(df: pd.DataFrame, preferida: str, alternativa: str) -> str | None:
-    if preferida in df.columns:
-        return preferida
+def convertir_fechas(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
 
-    if alternativa in df.columns:
-        return alternativa
+    df = df.copy()
 
-    return None
+    if "fecha" in df.columns:
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    elif "fecha_texto" in df.columns:
+        df["fecha"] = pd.to_datetime(
+            df["fecha_texto"],
+            format="%d/%m/%Y",
+            errors="coerce",
+        )
+
+    if "fecha_obs_ajuste" in df.columns:
+        df["fecha_obs_ajuste"] = pd.to_datetime(df["fecha_obs_ajuste"], errors="coerce")
+    elif "fecha_obs_ajuste_texto" in df.columns:
+        df["fecha_obs_ajuste"] = pd.to_datetime(
+            df["fecha_obs_ajuste_texto"],
+            format="%d/%m/%Y",
+            errors="coerce",
+        )
+
+    if "fecha_inicio_pronostico" in df.columns:
+        df["fecha_inicio_pronostico"] = pd.to_datetime(
+            df["fecha_inicio_pronostico"],
+            errors="coerce",
+        )
+
+    if "fecha_obs_usada" in df.columns:
+        df["fecha_obs_usada"] = pd.to_datetime(
+            df["fecha_obs_usada"],
+            errors="coerce",
+        )
+
+    return df
+
+
+def convertir_comid(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    if "comid" in df.columns:
+        df["comid"] = pd.to_numeric(df["comid"], errors="coerce")
+
+    return df
+
+
+def convertir_numericos(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    for col in df.columns:
+        if (
+            col.startswith("nivel_")
+            or col.startswith("prob_")
+            or col.startswith("primer_")
+            or col in [
+                "offset_ajuste_m",
+                "offset_aplicado",
+                "dias_desde_obs_ajuste",
+                "dias_desde_obs",
+                "diferencia_control_m",
+                "kge_2009",
+                "rmse_m",
+                "nse",
+                "r_pearson",
+            ]
+        ):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
 
 
 # ============================================================
-# LECTURA GPKG
+# LECTURA DE ARCHIVOS
 # ============================================================
 
 @st.cache_data(show_spinner=False)
-def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
-    if not gpkg_path.exists():
+def cargar_estaciones_gpkg(gpkg_path: str) -> pd.DataFrame:
+    path = Path(gpkg_path)
+
+    if not path.exists():
         return pd.DataFrame()
 
     try:
-        conn = sqlite3.connect(str(gpkg_path))
+        conn = sqlite3.connect(str(path))
 
         df = pd.read_sql_query(
             """
@@ -226,92 +299,78 @@ def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
     return out
 
 
-# ============================================================
-# CARGA DE ARCHIVOS
-# ============================================================
+def cargar_csv_sin_cache(path: Path) -> pd.DataFrame:
+    """
+    Se lee sin cache para evitar que Streamlit muestre un CSV antiguo.
+    """
 
-@st.cache_data(show_spinner=False)
-def cargar_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
 
     try:
         df = pd.read_csv(path)
         df = normalizar_columnas(df)
+        df = convertir_fechas(df)
+        df = convertir_comid(df)
+        df = convertir_numericos(df)
         return df
+
     except Exception as e:
         st.error(f"No se pudo leer CSV {path.name}: {e}")
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner=False)
-def cargar_parquet(path: Path) -> pd.DataFrame:
+def cargar_parquet_sin_cache(path: Path) -> pd.DataFrame:
+    """
+    Se lee sin cache para evitar resultados antiguos.
+    """
+
     if not path.exists():
         return pd.DataFrame()
 
     try:
         df = pd.read_parquet(path)
         df = normalizar_columnas(df)
+        df = convertir_fechas(df)
+        df = convertir_comid(df)
+        df = convertir_numericos(df)
         return df
+
     except Exception as e:
         st.error(f"No se pudo leer Parquet {path.name}: {e}")
         return pd.DataFrame()
 
 
-def preparar_fechas(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
+# ============================================================
+# FUNCIONES DE PROCESAMIENTO
+# ============================================================
 
-    df = df.copy()
+def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
+    requeridas = [
+        "nivel_prom_ajustado_m",
+        "nivel_min_ajustado_m",
+        "nivel_max_ajustado_m",
+        "ajuste_continuidad",
+        "offset_ajuste_m",
+        "nivel_obs_ajuste_m",
+        "advertencia_ajuste",
+    ]
 
-    if "fecha" in df.columns:
-        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-    elif "fecha_texto" in df.columns:
-        df["fecha"] = pd.to_datetime(
-            df["fecha_texto"],
-            format="%d/%m/%Y",
-            errors="coerce",
+    faltantes = [c for c in requeridas if c not in pron.columns]
+
+    if faltantes:
+        st.error(
+            "El archivo de pronóstico no tiene las columnas ajustadas necesarias. "
+            "Eso significa que Streamlit está leyendo un CSV antiguo o el script 04 no se ejecutó correctamente."
         )
 
-    if "fecha_obs_ajuste" in df.columns:
-        df["fecha_obs_ajuste"] = pd.to_datetime(df["fecha_obs_ajuste"], errors="coerce")
-    elif "fecha_obs_ajuste_texto" in df.columns:
-        df["fecha_obs_ajuste"] = pd.to_datetime(
-            df["fecha_obs_ajuste_texto"],
-            format="%d/%m/%Y",
-            errors="coerce",
-        )
+        st.write("Columnas faltantes:")
+        st.write(faltantes)
 
-    return df
+        st.write("Columnas disponibles en el CSV:")
+        st.write(list(pron.columns))
 
-
-def preparar_comid(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-
-    df = df.copy()
-
-    if "comid" in df.columns:
-        df["comid"] = pd.to_numeric(df["comid"], errors="coerce")
-
-    return df
-
-
-def preparar_numericos_pronostico(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-
-    df = df.copy()
-
-    for col in df.columns:
-        if (
-            col.startswith("nivel_")
-            or col.startswith("prob_")
-            or col in ["offset_ajuste_m", "dias_desde_obs_ajuste"]
-        ):
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    return df
+        st.stop()
 
 
 def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
@@ -323,25 +382,20 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     if not requeridas.issubset(set(pron.columns)):
         return pd.DataFrame()
 
-    pron = pron.copy()
-
-    col_min = columna_existente(pron, "nivel_min_ajustado_m", "nivel_min_m")
-    col_prom = columna_existente(pron, "nivel_prom_ajustado_m", "nivel_prom_m")
-    col_max = columna_existente(pron, "nivel_max_ajustado_m", "nivel_max_m")
-
-    if col_prom is None:
-        return pd.DataFrame()
-
     resumen = (
         pron.groupby(["estacion", "comid"], dropna=False)
         .agg(
             fecha_inicio=("fecha", "min"),
             fecha_fin=("fecha", "max"),
-            nivel_min_7dias=(col_min, "min") if col_min else (col_prom, "min"),
-            nivel_prom_7dias=(col_prom, "mean"),
-            nivel_max_7dias=(col_max, "max") if col_max else (col_prom, "max"),
-            nivel_inicio=(col_prom, "first"),
-            nivel_fin=(col_prom, "last"),
+            nivel_min_7dias=("nivel_min_ajustado_m", "min"),
+            nivel_prom_7dias=("nivel_prom_ajustado_m", "mean"),
+            nivel_max_7dias=("nivel_max_ajustado_m", "max"),
+            nivel_inicio=("nivel_prom_ajustado_m", "first"),
+            nivel_fin=("nivel_prom_ajustado_m", "last"),
+            ajuste_continuidad=("ajuste_continuidad", "first"),
+            offset_ajuste_m=("offset_ajuste_m", "first"),
+            nivel_obs_ajuste_m=("nivel_obs_ajuste_m", "first"),
+            advertencia_ajuste=("advertencia_ajuste", "first"),
         )
         .reset_index()
     )
@@ -431,12 +485,16 @@ def crear_mapa_estaciones(
             ]
 
             if not tmp.empty:
-                nivel_prom = tmp["nivel_prom_7dias"].iloc[0] if "nivel_prom_7dias" in tmp.columns else None
-                tendencia = tmp["tendencia"].iloc[0] if "tendencia" in tmp.columns else None
+                nivel_prom = tmp["nivel_prom_7dias"].iloc[0]
+                tendencia = tmp["tendencia"].iloc[0]
+                ajuste = tmp["ajuste_continuidad"].iloc[0]
+                offset = tmp["offset_ajuste_m"].iloc[0]
 
                 info_extra = f"""
                 <br><b>Nivel prom. ajustado 7 días:</b> {formato_num(nivel_prom)} m
                 <br><b>Tendencia:</b> {tendencia}
+                <br><b>Ajuste:</b> {ajuste}
+                <br><b>Offset:</b> {formato_num(offset, 3)} m
                 """
 
         popup_html = f"""
@@ -462,24 +520,17 @@ def crear_mapa_estaciones(
 # CARGA PRINCIPAL
 # ============================================================
 
-estaciones = cargar_estaciones_gpkg(GPKG_FILE)
-pron = cargar_csv(PRONOSTICO_CSV)
-valid = cargar_csv(VALIDACION_CSV)
-metricas = cargar_parquet(METRICAS_PARQUET)
-obs = cargar_parquet(OBS_PARQUET)
+estaciones = cargar_estaciones_gpkg(str(GPKG_FILE))
 
-for nombre in ["pron", "valid", "metricas", "obs"]:
-    tmp = globals()[nombre]
-    tmp = preparar_fechas(tmp)
-    tmp = preparar_comid(tmp)
-    globals()[nombre] = tmp
+pron = cargar_csv_sin_cache(PRONOSTICO_CSV)
+valid = cargar_csv_sin_cache(VALIDACION_CSV)
+diagnostico = cargar_csv_sin_cache(DIAGNOSTICO_CSV)
 
-pron = preparar_numericos_pronostico(pron)
+metricas = cargar_parquet_sin_cache(METRICAS_PARQUET)
+obs = cargar_parquet_sin_cache(OBS_PARQUET)
 
 if "nivel_m" in obs.columns:
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
-
-pron_resumen = preparar_resumen_pronostico(pron)
 
 
 # ============================================================
@@ -492,13 +543,13 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="subtitle">Sistema automático SONICS + HidroMet + DWLT</div>',
+    '<div class="subtitle">Sistema automático SONICS + HidroMet + DWLT ajustado por continuidad</div>',
     unsafe_allow_html=True,
 )
 
 
 # ============================================================
-# VALIDACIÓN ARCHIVOS
+# VALIDACIÓN DE ARCHIVOS
 # ============================================================
 
 faltantes = []
@@ -512,11 +563,18 @@ if pron.empty:
 if obs.empty:
     faltantes.append("backend/cache/observado_estaciones.parquet")
 
+if diagnostico.empty:
+    faltantes.append("outputs/diagnostico_ajuste_continuidad.csv")
+
 if faltantes:
     st.error("Faltan archivos necesarios para el visor:")
     for f in faltantes:
         st.write(f"- `{f}`")
     st.stop()
+
+validar_columnas_ajustadas(pron)
+
+pron_resumen = preparar_resumen_pronostico(pron)
 
 
 # ============================================================
@@ -571,28 +629,29 @@ with st.sidebar:
         key="selector_estacion_sidebar",
     )
 
-    # Importante: sin st.rerun() para evitar ciclos de carga.
     st.session_state.estacion_sel = estacion_sidebar
     estacion_sel = estacion_sidebar
 
     mostrar_tablas = st.checkbox("Mostrar tablas completas", value=False)
+    mostrar_diagnostico = st.checkbox("Mostrar diagnóstico de ajuste", value=True)
 
     st.markdown("---")
     st.subheader("Archivos cargados")
 
     checks = {
         "GPKG estaciones": not estaciones.empty,
-        "pronostico_nivel_7dias_estaciones.csv": not pron.empty,
-        "validacion_dwlt_hasta_observado_disponible.csv": not valid.empty,
-        "metricas_dwlt_estaciones.parquet": not metricas.empty,
-        "observado_estaciones.parquet": not obs.empty,
+        "pronóstico 7 días CSV": not pron.empty,
+        "diagnóstico ajuste CSV": not diagnostico.empty,
+        "validación CSV": not valid.empty,
+        "métricas Parquet": not metricas.empty,
+        "observado Parquet": not obs.empty,
     }
 
     for nombre, ok in checks.items():
         st.write(("✅ " if ok else "❌ ") + nombre)
 
     st.markdown("---")
-    st.info("El click en el mapa está desactivado temporalmente para evitar bloqueo de carga.")
+    st.caption("El visor lee el CSV sin cache para evitar mostrar datos antiguos.")
 
 
 # ============================================================
@@ -600,6 +659,7 @@ with st.sidebar:
 # ============================================================
 
 estacion_sel = st.session_state.estacion_sel
+
 pron_est = pron[pron["estacion"] == estacion_sel].copy()
 pron_est = pron_est.sort_values("fecha").copy()
 
@@ -615,6 +675,7 @@ elif not pron_est.empty and "comid" in pron_est.columns:
 metricas_est = pd.DataFrame()
 valid_est = pd.DataFrame()
 obs_est = pd.DataFrame()
+diagnostico_est = pd.DataFrame()
 estacion_map_est = pd.DataFrame()
 
 if comid_sel is not None:
@@ -636,6 +697,12 @@ if comid_sel is not None:
         else pd.DataFrame()
     )
 
+    diagnostico_est = (
+        diagnostico[pd.to_numeric(diagnostico["comid"], errors="coerce") == float(comid_sel)].copy()
+        if not diagnostico.empty and "comid" in diagnostico.columns
+        else pd.DataFrame()
+    )
+
     estacion_map_est = (
         estaciones[estaciones["comid"] == int(comid_sel)].copy()
         if not estaciones.empty and "comid" in estaciones.columns
@@ -651,15 +718,6 @@ obs_5dias = obtener_observado_5dias_previos(
     obs_est=obs_est,
     fecha_inicio_pronostico=fecha_inicio_pron,
 )
-
-
-# ============================================================
-# COLUMNAS DE PLOT
-# ============================================================
-
-col_prom_plot = columna_existente(pron_est, "nivel_prom_ajustado_m", "nivel_prom_m")
-col_min_plot = columna_existente(pron_est, "nivel_min_ajustado_m", "nivel_min_m")
-col_max_plot = columna_existente(pron_est, "nivel_max_ajustado_m", "nivel_max_m")
 
 
 # ============================================================
@@ -731,19 +789,16 @@ with col_panel:
     nivel_max = None
     tendencia_val = None
 
-    if not pron_est.empty and col_prom_plot is not None:
-        valores = pron_est[col_prom_plot].dropna()
+    if not pron_est.empty:
+        serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
 
-        if not valores.empty:
-            nivel_inicio = valores.iloc[0]
-            nivel_fin = valores.iloc[-1]
+        if not serie_prom.empty:
+            nivel_inicio = serie_prom.iloc[0]
+            nivel_fin = serie_prom.iloc[-1]
             tendencia_val = nivel_fin - nivel_inicio
 
-    if not pron_est.empty and col_min_plot is not None:
-        nivel_min = pron_est[col_min_plot].min()
-
-    if not pron_est.empty and col_max_plot is not None:
-        nivel_max = pron_est[col_max_plot].max()
+        nivel_min = pron_est["nivel_min_ajustado_m"].min()
+        nivel_max = pron_est["nivel_max_ajustado_m"].max()
 
     kge = None
     rmse = None
@@ -754,6 +809,25 @@ with col_panel:
 
         if "rmse_m" in metricas_est.columns:
             rmse = metricas_est["rmse_m"].iloc[0]
+
+    ajuste_txt = "Sin dato"
+    offset_txt = "Sin dato"
+    advertencia_txt = ""
+    nivel_obs_ajuste_txt = "Sin dato"
+    fecha_obs_ajuste_txt = "Sin dato"
+
+    if not pron_est.empty:
+        ajuste_txt = str(pron_est["ajuste_continuidad"].iloc[0])
+        offset_txt = formato_num(pron_est["offset_ajuste_m"].iloc[0], 3)
+        advertencia_txt = str(pron_est["advertencia_ajuste"].iloc[0])
+        nivel_obs_ajuste_txt = formato_num(pron_est["nivel_obs_ajuste_m"].iloc[0], 3)
+
+        if "fecha_obs_ajuste_texto" in pron_est.columns:
+            fecha_obs_ajuste_txt = str(pron_est["fecha_obs_ajuste_texto"].iloc[0])
+        elif "fecha_obs_ajuste" in pron_est.columns:
+            fecha_tmp = pd.to_datetime(pron_est["fecha_obs_ajuste"].iloc[0], errors="coerce")
+            if pd.notna(fecha_tmp):
+                fecha_obs_ajuste_txt = fecha_tmp.strftime("%d/%m/%Y")
 
     k1, k2, k3, k4 = st.columns(4)
 
@@ -781,9 +855,48 @@ with col_panel:
         delta=f"KGE {formato_num(kge, 3)} | RMSE {formato_num(rmse, 3)} m",
     )
 
+    st.caption(
+        f"Ajuste de continuidad: {ajuste_txt} | "
+        f"Offset aplicado: {offset_txt} m | "
+        f"Nivel observado usado: {nivel_obs_ajuste_txt} m | "
+        f"Fecha observada usada: {fecha_obs_ajuste_txt}"
+    )
+
     if fecha_obs_reciente is not None:
         st.caption(
             f"Última observación usada en gráfico: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')}"
+        )
+
+    if advertencia_txt and advertencia_txt != "Ajuste aplicado":
+        st.warning(advertencia_txt)
+
+    if mostrar_diagnostico and not diagnostico_est.empty:
+        st.markdown(
+            '<div class="section-title">Diagnóstico de ajuste de continuidad</div>',
+            unsafe_allow_html=True,
+        )
+
+        cols_diag = [
+            "estacion",
+            "comid",
+            "fecha_inicio_pronostico",
+            "fecha_obs_usada",
+            "nivel_obs_usado",
+            "primer_nivel_bruto",
+            "offset_aplicado",
+            "primer_nivel_ajustado",
+            "diferencia_control_m",
+            "dias_desde_obs",
+            "ajuste_continuidad",
+            "advertencia_ajuste",
+        ]
+
+        cols_diag = [c for c in cols_diag if c in diagnostico_est.columns]
+
+        st.dataframe(
+            diagnostico_est[cols_diag],
+            use_container_width=True,
+            hide_index=True,
         )
 
     st.markdown(
@@ -805,11 +918,11 @@ with col_panel:
             )
         )
 
-    if not pron_est.empty and col_prom_plot is not None:
+    if not pron_est.empty:
         fig.add_trace(
             go.Scatter(
                 x=pron_est["fecha"],
-                y=pron_est[col_prom_plot],
+                y=pron_est["nivel_prom_ajustado_m"],
                 mode="lines+markers",
                 name="Pronóstico medio ajustado",
                 line=dict(width=3),
@@ -817,11 +930,10 @@ with col_panel:
             )
         )
 
-    if not pron_est.empty and col_min_plot is not None and col_max_plot is not None:
         fig.add_trace(
             go.Scatter(
                 x=pron_est["fecha"],
-                y=pron_est[col_max_plot],
+                y=pron_est["nivel_max_ajustado_m"],
                 mode="lines",
                 name="Máximo ajustado",
                 line=dict(width=1, dash="dot"),
@@ -831,7 +943,7 @@ with col_panel:
         fig.add_trace(
             go.Scatter(
                 x=pron_est["fecha"],
-                y=pron_est[col_min_plot],
+                y=pron_est["nivel_min_ajustado_m"],
                 mode="lines",
                 name="Mínimo ajustado",
                 line=dict(width=1, dash="dot"),
@@ -877,7 +989,8 @@ with col_panel:
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "El gráfico muestra los 5 días observados previos y el pronóstico DWLT ajustado por continuidad al último observado."
+        "El gráfico usa obligatoriamente las columnas ajustadas: "
+        "nivel_prom_ajustado_m, nivel_min_ajustado_m y nivel_max_ajustado_m."
     )
 
     col_tabla, col_resumen = st.columns([1.45, 1.0], gap="large")
@@ -890,6 +1003,7 @@ with col_panel:
 
         cols_pron = [
             "fecha",
+            "fecha_texto",
             "nivel_prom_ajustado_m",
             "nivel_min_ajustado_m",
             "nivel_max_ajustado_m",
@@ -910,56 +1024,23 @@ with col_panel:
 
         cols_pron = [c for c in cols_pron if c in pron_est.columns]
 
-        if cols_pron:
-            tabla_pron = pron_est[cols_pron].copy()
+        tabla_pron = pron_est[cols_pron].copy()
 
-            for c in tabla_pron.columns:
-                if c.startswith("nivel_") or c == "offset_ajuste_m":
-                    tabla_pron[c] = pd.to_numeric(tabla_pron[c], errors="coerce").round(3)
+        for c in tabla_pron.columns:
+            if c.startswith("nivel_") or c == "offset_ajuste_m":
+                tabla_pron[c] = pd.to_numeric(tabla_pron[c], errors="coerce").round(3)
 
-            st.dataframe(
-                tabla_pron,
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.info("No hay columnas de pronóstico disponibles para esta estación.")
+        st.dataframe(
+            tabla_pron,
+            use_container_width=True,
+            hide_index=True,
+        )
 
     with col_resumen:
         st.markdown(
             '<div class="section-title">Resumen de pronóstico</div>',
             unsafe_allow_html=True,
         )
-
-        ajuste_txt = "Sin dato"
-        offset_txt = "Sin dato"
-        fecha_obs_ajuste_txt = "Sin dato"
-        nivel_obs_ajuste_txt = "Sin dato"
-        dias_obs_txt = "Sin dato"
-        advertencia_txt = ""
-
-        if not pron_est.empty:
-            if "ajuste_continuidad" in pron_est.columns:
-                ajuste_txt = str(pron_est["ajuste_continuidad"].iloc[0])
-
-            if "offset_ajuste_m" in pron_est.columns:
-                offset_txt = formato_num(pron_est["offset_ajuste_m"].iloc[0], 3)
-
-            if "fecha_obs_ajuste_texto" in pron_est.columns:
-                fecha_obs_ajuste_txt = str(pron_est["fecha_obs_ajuste_texto"].iloc[0])
-            elif "fecha_obs_ajuste" in pron_est.columns:
-                fecha_tmp = pd.to_datetime(pron_est["fecha_obs_ajuste"].iloc[0], errors="coerce")
-                if pd.notna(fecha_tmp):
-                    fecha_obs_ajuste_txt = fecha_tmp.strftime("%d/%m/%Y")
-
-            if "nivel_obs_ajuste_m" in pron_est.columns:
-                nivel_obs_ajuste_txt = f"{formato_num(pron_est['nivel_obs_ajuste_m'].iloc[0])} m"
-
-            if "dias_desde_obs_ajuste" in pron_est.columns:
-                dias_obs_txt = formato_num(pron_est["dias_desde_obs_ajuste"].iloc[0], 0)
-
-            if "advertencia_ajuste" in pron_est.columns:
-                advertencia_txt = str(pron_est["advertencia_ajuste"].iloc[0])
 
         st.write(f"**COMID:** {int(comid_sel) if comid_sel is not None else 'Sin dato'}")
         st.write(f"**Nivel mínimo 7 días ajustado:** {formato_num(nivel_min)} m")
@@ -970,8 +1051,7 @@ with col_panel:
         st.write(f"**Ajuste de continuidad:** {ajuste_txt}")
         st.write(f"**Offset aplicado:** {offset_txt} m")
         st.write(f"**Fecha observada usada:** {fecha_obs_ajuste_txt}")
-        st.write(f"**Nivel observado usado:** {nivel_obs_ajuste_txt}")
-        st.write(f"**Días desde observado:** {dias_obs_txt}")
+        st.write(f"**Nivel observado usado:** {nivel_obs_ajuste_txt} m")
 
         if advertencia_txt:
             st.warning(advertencia_txt)
@@ -986,7 +1066,6 @@ with col_panel:
     if valid_est.empty:
         st.info("No hay validación reciente para esta estación.")
     else:
-        valid_est = preparar_fechas(valid_est)
         valid_est = valid_est.sort_values("fecha").copy()
 
         fig_val = go.Figure()
@@ -1049,9 +1128,10 @@ with col_panel:
             unsafe_allow_html=True,
         )
 
-        tab1, tab2, tab3, tab4 = st.tabs(
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
             [
                 "Pronóstico",
+                "Diagnóstico ajuste",
                 "Validación",
                 "Métricas",
                 "Observado",
@@ -1062,12 +1142,15 @@ with col_panel:
             st.dataframe(pron_est, use_container_width=True, hide_index=True)
 
         with tab2:
-            st.dataframe(valid_est, use_container_width=True, hide_index=True)
+            st.dataframe(diagnostico_est, use_container_width=True, hide_index=True)
 
         with tab3:
-            st.dataframe(metricas_est, use_container_width=True, hide_index=True)
+            st.dataframe(valid_est, use_container_width=True, hide_index=True)
 
         with tab4:
+            st.dataframe(metricas_est, use_container_width=True, hide_index=True)
+
+        with tab5:
             obs_show = obs_est.sort_values("fecha").tail(90).copy() if not obs_est.empty else pd.DataFrame()
             st.dataframe(obs_show, use_container_width=True, hide_index=True)
 
@@ -1076,7 +1159,7 @@ with col_panel:
         unsafe_allow_html=True,
     )
 
-    d1, d2 = st.columns(2)
+    d1, d2, d3 = st.columns(3)
 
     with d1:
         st.download_button(
@@ -1087,6 +1170,14 @@ with col_panel:
         )
 
     with d2:
+        st.download_button(
+            label="Descargar diagnóstico ajuste CSV",
+            data=diagnostico.to_csv(index=False, encoding="utf-8-sig"),
+            file_name="diagnostico_ajuste_continuidad.csv",
+            mime="text/csv",
+        )
+
+    with d3:
         if not valid.empty:
             st.download_button(
                 label="Descargar validación CSV",

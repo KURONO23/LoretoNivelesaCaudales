@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
+import math
 import sqlite3
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import interp1d
 
 
 # ============================================================
@@ -28,6 +29,14 @@ OUT_HIST = OUTPUT_DIR / "hist_nivel_transformado.parquet"
 OUT_FORE = OUTPUT_DIR / "fore_nivel_transformado.parquet"
 OUT_METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OUT_METRICAS_XLSX = OUTPUT_DIR / "metricas_dwlt_estaciones.xlsx"
+
+# Mínimos por mes para construir curvas mensuales.
+MIN_DATOS_MES_SIM = 30
+MIN_DATOS_MES_OBS = 30
+
+# El DWLT original de forecast normalmente usa el mes de inicio del pronóstico.
+# Si quieres usar el mes de cada fecha del forecast, cambia a False.
+FORECAST_USA_MES_INICIO = True
 
 
 # ============================================================
@@ -229,84 +238,234 @@ def kge_2009(obs, sim):
 
 
 # ============================================================
-# FUNCIONES DWLT
+# DWLT ESTILO ORIGINAL: HISTOGRAMA + CDF MENSUAL
 # ============================================================
 
-def prob_no_excedencia(valor: float, serie_simulada: np.ndarray) -> float:
+def limpiar_serie_numerica(values) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    return arr
+
+
+def sturges_bins(n: int) -> int:
     """
-    Calcula P(X <= valor), es decir la probabilidad de no excedencia.
+    Número de clases por regla de Sturges:
+    k = ceil(1 + log2(n))
+    """
+    if n <= 1:
+        return 1
+
+    return max(2, int(math.ceil(1 + math.log2(n))))
+
+
+def construir_cdf_histograma(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Construye una CDF empírica suavizada por histograma.
+
+    Devuelve:
+        x_points: valores de la variable
+        p_points: probabilidad de no excedencia P(X <= x)
     """
 
-    serie = np.asarray(serie_simulada, dtype=float)
-    serie = serie[np.isfinite(serie)]
+    values = limpiar_serie_numerica(values)
 
-    if len(serie) < 5:
-        return np.nan
+    if len(values) < 5:
+        return np.array([]), np.array([])
 
-    serie_ordenada = np.sort(serie)
+    if np.nanmin(values) == np.nanmax(values):
+        x = np.array([values[0] - 1e-9, values[0], values[0] + 1e-9], dtype=float)
+        p = np.array([0.0, 0.5, 1.0], dtype=float)
+        return x, p
 
-    probs = np.arange(1, len(serie_ordenada) + 1, dtype=float) / (len(serie_ordenada) + 1)
+    bins = sturges_bins(len(values))
 
-    p = np.interp(
-        valor,
-        serie_ordenada,
-        probs,
-        left=probs[0],
-        right=probs[-1],
+    counts, bin_edges = np.histogram(values, bins=bins)
+
+    if counts.sum() == 0:
+        return np.array([]), np.array([])
+
+    cdf = np.cumsum(counts).astype(float) / float(counts.sum())
+
+    # Usamos bordes superiores como puntos de CDF y añadimos el borde inferior con probabilidad 0.
+    x_points = np.concatenate(([bin_edges[0]], bin_edges[1:]))
+    p_points = np.concatenate(([0.0], cdf))
+
+    # Evitar problemas por puntos repetidos.
+    tmp = pd.DataFrame({
+        "x": x_points,
+        "p": p_points,
+    })
+
+    tmp = (
+        tmp.groupby("x", as_index=False)
+        .agg(p=("p", "max"))
+        .sort_values("x")
     )
 
-    return float(p)
+    return tmp["x"].to_numpy(dtype=float), tmp["p"].to_numpy(dtype=float)
 
 
-def nivel_equivalente(probabilidad: float, serie_nivel_observado: np.ndarray) -> float:
+def mapear_valor_a_probabilidad(
+    valor: float,
+    serie_referencia: np.ndarray,
+    extrapolate: bool = False,
+) -> float:
     """
-    Obtiene el nivel observado asociado a la misma probabilidad de no excedencia.
+    Equivalente a mapeo caudal/nivel -> probabilidad.
+
+    Usa histograma mensual + CDF.
     """
 
-    niveles = np.asarray(serie_nivel_observado, dtype=float)
-    niveles = niveles[np.isfinite(niveles)]
-
-    if len(niveles) < 5:
+    if pd.isna(valor):
         return np.nan
 
-    niveles_ordenados = np.sort(niveles)
+    x_points, p_points = construir_cdf_histograma(serie_referencia)
 
-    probs = np.arange(1, len(niveles_ordenados) + 1, dtype=float) / (len(niveles_ordenados) + 1)
+    if len(x_points) < 2:
+        return np.nan
 
-    nivel = np.interp(
-        probabilidad,
-        probs,
-        niveles_ordenados,
-        left=niveles_ordenados[0],
-        right=niveles_ordenados[-1],
+    if extrapolate:
+        f = interp1d(
+            x_points,
+            p_points,
+            kind="linear",
+            bounds_error=False,
+            fill_value="extrapolate",
+            assume_sorted=True,
+        )
+
+        p = float(f(float(valor)))
+
+    else:
+        p = float(
+            np.interp(
+                float(valor),
+                x_points,
+                p_points,
+                left=p_points[0],
+                right=p_points[-1],
+            )
+        )
+
+    # Probabilidad válida entre 0 y 1.
+    p = float(np.clip(p, 0.0, 1.0))
+
+    return p
+
+
+def mapear_probabilidad_a_valor(
+    probabilidad: float,
+    serie_referencia: np.ndarray,
+    extrapolate: bool = False,
+) -> float:
+    """
+    Equivalente a mapeo probabilidad -> nivel.
+
+    Usa histograma mensual + CDF inversa.
+    """
+
+    if pd.isna(probabilidad):
+        return np.nan
+
+    x_points, p_points = construir_cdf_histograma(serie_referencia)
+
+    if len(x_points) < 2:
+        return np.nan
+
+    tmp = pd.DataFrame({
+        "p": p_points,
+        "x": x_points,
+    })
+
+    tmp = (
+        tmp.groupby("p", as_index=False)
+        .agg(x=("x", "mean"))
+        .sort_values("p")
     )
 
-    return float(nivel)
+    p_unique = tmp["p"].to_numpy(dtype=float)
+    x_unique = tmp["x"].to_numpy(dtype=float)
+
+    if len(p_unique) < 2:
+        return np.nan
+
+    probabilidad = float(probabilidad)
+
+    if extrapolate:
+        f = interp1d(
+            p_unique,
+            x_unique,
+            kind="linear",
+            bounds_error=False,
+            fill_value="extrapolate",
+            assume_sorted=True,
+        )
+
+        valor = float(f(probabilidad))
+
+    else:
+        valor = float(
+            np.interp(
+                probabilidad,
+                p_unique,
+                x_unique,
+                left=x_unique[0],
+                right=x_unique[-1],
+            )
+        )
+
+    return valor
 
 
-def transformar_valor_dwlt(
+def transformar_valor_dwlt_original(
     caudal: float,
-    mes: int,
+    mes_dwlt: int,
     hist_sim_est: pd.DataFrame,
     obs_est: pd.DataFrame,
+    extrapolate: bool = False,
 ) -> tuple[float, float]:
     """
-    Transforma un caudal SONICS a nivel de agua mediante DWLT mensual.
+    Transforma caudal a nivel usando la lógica DWLT original:
+
+    caudal simulado mensual
+        -> probabilidad mensual de no excedencia
+        -> nivel observado mensual equivalente
     """
 
-    if pd.isna(caudal):
+    if pd.isna(caudal) or pd.isna(mes_dwlt):
         return np.nan, np.nan
 
-    sim_mes = hist_sim_est.loc[hist_sim_est["mes"] == mes, "qr_hist"].to_numpy(dtype=float)
-    obs_mes = obs_est.loc[obs_est["mes"] == mes, "nivel_m"].to_numpy(dtype=float)
+    mes_dwlt = int(mes_dwlt)
 
-    if len(sim_mes) < 30 or len(obs_mes) < 30:
+    sim_mes = hist_sim_est.loc[
+        hist_sim_est["mes"] == mes_dwlt,
+        "qr_hist",
+    ].to_numpy(dtype=float)
+
+    obs_mes = obs_est.loc[
+        obs_est["mes"] == mes_dwlt,
+        "nivel_m",
+    ].to_numpy(dtype=float)
+
+    sim_mes = limpiar_serie_numerica(sim_mes)
+    obs_mes = limpiar_serie_numerica(obs_mes)
+
+    if len(sim_mes) < MIN_DATOS_MES_SIM or len(obs_mes) < MIN_DATOS_MES_OBS:
         return np.nan, np.nan
 
-    p = prob_no_excedencia(float(caudal), sim_mes)
-    nivel = nivel_equivalente(p, obs_mes)
+    prob = mapear_valor_a_probabilidad(
+        valor=float(caudal),
+        serie_referencia=sim_mes,
+        extrapolate=extrapolate,
+    )
 
-    return nivel, p
+    nivel = mapear_probabilidad_a_valor(
+        probabilidad=prob,
+        serie_referencia=obs_mes,
+        extrapolate=extrapolate,
+    )
+
+    return nivel, prob
 
 
 def transformar_historico_estacion(
@@ -315,14 +474,22 @@ def transformar_historico_estacion(
     hist_sim_est: pd.DataFrame,
     obs_est: pd.DataFrame,
 ) -> pd.DataFrame:
+    """
+    Corrige histórico al estilo correct_historical():
+    usa el mes de cada registro histórico.
+    """
+
     filas = []
 
     for _, row in hist_sim_est.iterrows():
-        nivel, p = transformar_valor_dwlt(
+        mes_dwlt = int(row["mes"])
+
+        nivel, p = transformar_valor_dwlt_original(
             caudal=row["qr_hist"],
-            mes=int(row["mes"]),
+            mes_dwlt=mes_dwlt,
             hist_sim_est=hist_sim_est,
             obs_est=obs_est,
+            extrapolate=False,
         )
 
         filas.append({
@@ -330,9 +497,11 @@ def transformar_historico_estacion(
             "comid": comid,
             "estacion": estacion,
             "mes": int(row["mes"]),
+            "mes_dwlt": mes_dwlt,
             "qr_hist": row["qr_hist"],
             "prob_no_excedencia": p,
             "nivel_dwlt_m": nivel,
+            "metodo_dwlt": "histograma_cdf_mensual_estilo_original",
         })
 
     out = pd.DataFrame(filas)
@@ -352,8 +521,24 @@ def transformar_pronostico_estacion(
     hist_sim_est: pd.DataFrame,
     obs_est: pd.DataFrame,
 ) -> pd.DataFrame:
+    """
+    Corrige forecast al estilo correct_forecast().
+
+    Por defecto usa el mes de inicio del pronóstico para todo el horizonte,
+    que es el comportamiento más parecido al método original.
+    """
+
     out = fore_est.copy()
     out["estacion"] = estacion
+
+    if out.empty:
+        return out
+
+    if FORECAST_USA_MES_INICIO:
+        mes_inicio = int(pd.to_datetime(out["fecha"].min()).month)
+        out["mes_dwlt"] = mes_inicio
+    else:
+        out["mes_dwlt"] = out["mes"].astype(int)
 
     columnas_fore = ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]
 
@@ -365,11 +550,12 @@ def transformar_pronostico_estacion(
         probs = []
 
         for _, row in out.iterrows():
-            nivel, p = transformar_valor_dwlt(
+            nivel, p = transformar_valor_dwlt_original(
                 caudal=row[col],
-                mes=int(row["mes"]),
+                mes_dwlt=int(row["mes_dwlt"]),
                 hist_sim_est=hist_sim_est,
                 obs_est=obs_est,
+                extrapolate=True,
             )
 
             niveles.append(nivel)
@@ -392,8 +578,14 @@ def transformar_pronostico_estacion(
         out["nivel_p75_m"] = out[nivel_cols].quantile(0.75, axis=1)
         out["nivel_max_m"] = out[nivel_cols].max(axis=1)
 
+    out["metodo_dwlt"] = "histograma_cdf_mensual_estilo_original"
+
     return out.sort_values("fecha").reset_index(drop=True)
 
+
+# ============================================================
+# MÉTRICAS POR ESTACIÓN
+# ============================================================
 
 def calcular_metricas_estacion(
     comid: int,
@@ -430,6 +622,7 @@ def calcular_metricas_estacion(
     out = {
         "estacion": estacion,
         "comid": comid,
+        "metodo_dwlt": "histograma_cdf_mensual_estilo_original",
         "n_hist_sonics": int(len(hist_sim_est)),
         "n_obs_nivel": int(len(obs_est)),
         "n_fore_sonics": int(len(fore_dwlt_est)),
@@ -465,6 +658,7 @@ def calcular_metricas_estacion(
 def main():
     print("=" * 100)
     print("DWLT PARA TODAS LAS ESTACIONES - LORETO")
+    print("MÉTODO: HISTOGRAMA + CDF MENSUAL ESTILO ORIGINAL")
     print("=" * 100)
 
     require_file(GPKG_FILE)
@@ -490,20 +684,26 @@ def main():
 
     estaciones["comid"] = pd.to_numeric(estaciones["comid"], errors="coerce").astype("Int64")
 
+    if "qr_hist" not in hist.columns:
+        raise ValueError("hist_filtrado.parquet debe tener columna qr_hist.")
+
     hist["qr_hist"] = pd.to_numeric(hist["qr_hist"], errors="coerce")
 
     for col in ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]:
         if col in fore.columns:
             fore[col] = pd.to_numeric(fore[col], errors="coerce")
 
+    if "nivel_m" not in obs.columns:
+        raise ValueError("observado_estaciones.parquet debe tener columna nivel_m.")
+
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
 
-    hist = hist.dropna(subset=["fecha", "comid", "qr_hist"])
+    hist = hist.dropna(subset=["fecha", "comid", "qr_hist", "mes"]).copy()
     hist = hist[hist["qr_hist"] > 0].copy()
 
-    fore = fore.dropna(subset=["fecha", "comid"]).copy()
+    fore = fore.dropna(subset=["fecha", "comid", "mes"]).copy()
 
-    obs = obs.dropna(subset=["fecha", "comid", "nivel_m"])
+    obs = obs.dropna(subset=["fecha", "comid", "nivel_m", "mes"]).copy()
     obs = obs[obs["nivel_m"] > 0].copy()
 
     estaciones_validas = estaciones.dropna(subset=["comid"]).copy()
@@ -513,6 +713,7 @@ def main():
     print(f"Histórico SONICS: {len(hist):,} registros")
     print(f"Pronóstico SONICS: {len(fore):,} registros")
     print(f"Observado nivel: {len(obs):,} registros")
+    print(f"Forecast usa mes de inicio: {FORECAST_USA_MES_INICIO}")
 
     lista_hist_dwlt = []
     lista_fore_dwlt = []
@@ -620,6 +821,7 @@ def main():
     cols_show = [
         "estacion",
         "comid",
+        "metodo_dwlt",
         "n_validacion",
         "r_pearson",
         "nse",

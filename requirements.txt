@@ -14,7 +14,9 @@ google-auth-httplib2
 python-dotenv
 requests
 openpyxl
-streamlit
-plotly
-folium
-streamlit-folium
+
+streamlit==1.48.1
+plotly==5.24.1
+folium==0.17.0
+streamlit-folium==0.22.1
+starlette==0.47.2

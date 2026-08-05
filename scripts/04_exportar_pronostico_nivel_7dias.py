@@ -50,6 +50,23 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def nombre_columna_ajustada(col: str) -> str:
+    """
+    Convierte correctamente:
+        nivel_min_m      -> nivel_min_ajustado_m
+        nivel_prom_m     -> nivel_prom_ajustado_m
+        nivel_max_m      -> nivel_max_ajustado_m
+        nivel_eta_eqm_m  -> nivel_eta_eqm_ajustado_m
+
+    No usar col.replace("_m", "_ajustado_m"), porque rompe nivel_min_m.
+    """
+
+    if col.endswith("_m"):
+        return col[:-2] + "_ajustado_m"
+
+    return col + "_ajustado"
+
+
 def clasificar_tendencia(x):
     if pd.isna(x):
         return "Sin dato"
@@ -128,7 +145,7 @@ def aplicar_ajuste_continuidad(
     Luego:
         nivel_*_ajustado_m = nivel_*_m + offset
 
-    También genera un diagnóstico por estación.
+    También genera diagnóstico por estación.
     """
 
     pron = pron.copy()
@@ -144,7 +161,7 @@ def aplicar_ajuste_continuidad(
         pron[col] = pd.to_numeric(pron[col], errors="coerce")
 
     for col in nivel_cols:
-        pron[col.replace("_m", "_ajustado_m")] = np.nan
+        pron[nombre_columna_ajustada(col)] = np.nan
 
     pron["ajuste_continuidad"] = "No"
     pron["offset_ajuste_m"] = np.nan
@@ -160,7 +177,7 @@ def aplicar_ajuste_continuidad(
         pron["advertencia_ajuste"] = "Sin archivo observado para ajuste"
 
         for col in nivel_cols:
-            pron[col.replace("_m", "_ajustado_m")] = pron[col]
+            pron[nombre_columna_ajustada(col)] = pron[col]
 
         diag = (
             pron.groupby(["estacion", "comid"], dropna=False)
@@ -223,7 +240,7 @@ def aplicar_ajuste_continuidad(
 
         if obs_est.empty:
             for col in nivel_cols:
-                g[col.replace("_m", "_ajustado_m")] = g[col]
+                g[nombre_columna_ajustada(col)] = g[col]
 
             g["advertencia_ajuste"] = "Sin observado previo al inicio del pronóstico"
 
@@ -250,7 +267,7 @@ def aplicar_ajuste_continuidad(
 
         if dias_desde_obs > MAX_DIAS_OBS_AJUSTE:
             for col in nivel_cols:
-                g[col.replace("_m", "_ajustado_m")] = g[col]
+                g[nombre_columna_ajustada(col)] = g[col]
 
             g["fecha_obs_ajuste"] = fecha_obs
             g["nivel_obs_ajuste_m"] = nivel_obs
@@ -274,7 +291,7 @@ def aplicar_ajuste_continuidad(
 
         if "nivel_prom_m" not in g.columns:
             for col in nivel_cols:
-                g[col.replace("_m", "_ajustado_m")] = g[col]
+                g[nombre_columna_ajustada(col)] = g[col]
 
             g["advertencia_ajuste"] = "No existe nivel_prom_m para calcular offset"
             diag["advertencia_ajuste"] = "No existe nivel_prom_m para calcular offset"
@@ -286,7 +303,7 @@ def aplicar_ajuste_continuidad(
 
         if primer_pron.empty or pd.isna(nivel_obs):
             for col in nivel_cols:
-                g[col.replace("_m", "_ajustado_m")] = g[col]
+                g[nombre_columna_ajustada(col)] = g[col]
 
             g["advertencia_ajuste"] = "No se pudo calcular offset"
             diag["advertencia_ajuste"] = "No se pudo calcular offset"
@@ -298,7 +315,7 @@ def aplicar_ajuste_continuidad(
         offset = nivel_obs - nivel_pron_ini
 
         for col in nivel_cols:
-            g[col.replace("_m", "_ajustado_m")] = g[col] + offset
+            g[nombre_columna_ajustada(col)] = g[col] + offset
 
         g["ajuste_continuidad"] = "Sí"
         g["offset_ajuste_m"] = offset
@@ -314,6 +331,7 @@ def aplicar_ajuste_continuidad(
         g["advertencia_ajuste"] = advertencia
 
         primer_ajustado = np.nan
+
         if "nivel_prom_ajustado_m" in g.columns:
             serie_ajustada = pd.to_numeric(g["nivel_prom_ajustado_m"], errors="coerce").dropna()
             if not serie_ajustada.empty:
@@ -443,7 +461,7 @@ def main() -> None:
         "nivel_p75_ajustado_m",
         "nivel_max_ajustado_m",
 
-        # Control de ajuste
+        # Control
         "ajuste_continuidad",
         "offset_ajuste_m",
         "fecha_obs_ajuste",
@@ -503,7 +521,7 @@ def main() -> None:
         "nivel_gfs_m",
         "nivel_wrf_m",
 
-        # Control de ajuste
+        # Control del ajuste
         "ajuste_continuidad",
         "offset_ajuste_m",
         "fecha_obs_ajuste",

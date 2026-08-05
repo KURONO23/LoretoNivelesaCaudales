@@ -75,6 +75,7 @@ jobs:
           git add -f outputs/metricas_dwlt_estaciones.xlsx
           git add -f outputs/pronostico_nivel_7dias_estaciones.xlsx
           git add -f outputs/pronostico_nivel_7dias_estaciones.csv
+          git add -f outputs/diagnostico_ajuste_continuidad.csv
           git add -f outputs/validacion_dwlt_hasta_observado_disponible.xlsx
           git add -f outputs/validacion_dwlt_hasta_observado_disponible.csv
 

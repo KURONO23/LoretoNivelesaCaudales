@@ -157,7 +157,7 @@ def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
     """
     Lee directamente el GPKG de estaciones.
 
-    Requiere la tabla:
+    Requiere tabla:
         estaciones_latlong
 
     Requiere columnas:
@@ -281,6 +281,18 @@ def preparar_fechas(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
 
+    if "fecha_obs_ajuste" in df.columns:
+        df["fecha_obs_ajuste"] = pd.to_datetime(
+            df["fecha_obs_ajuste"],
+            errors="coerce",
+        )
+    elif "fecha_obs_ajuste_texto" in df.columns:
+        df["fecha_obs_ajuste"] = pd.to_datetime(
+            df["fecha_obs_ajuste_texto"],
+            format="%d/%m/%Y",
+            errors="coerce",
+        )
+
     return df
 
 
@@ -300,14 +312,21 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     if pron.empty:
         return pd.DataFrame()
 
-    requeridas = {"estacion", "comid", "fecha", "nivel_prom_m"}
+    requeridas = {"estacion", "comid", "fecha"}
 
     if not requeridas.issubset(set(pron.columns)):
         return pd.DataFrame()
 
     pron = pron.copy()
 
-    for col in ["nivel_min_m", "nivel_prom_m", "nivel_max_m"]:
+    col_min = "nivel_min_ajustado_m" if "nivel_min_ajustado_m" in pron.columns else "nivel_min_m"
+    col_prom = "nivel_prom_ajustado_m" if "nivel_prom_ajustado_m" in pron.columns else "nivel_prom_m"
+    col_max = "nivel_max_ajustado_m" if "nivel_max_ajustado_m" in pron.columns else "nivel_max_m"
+
+    if col_prom not in pron.columns:
+        return pd.DataFrame()
+
+    for col in [col_min, col_prom, col_max]:
         if col in pron.columns:
             pron[col] = pd.to_numeric(pron[col], errors="coerce")
 
@@ -316,11 +335,11 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
         .agg(
             fecha_inicio=("fecha", "min"),
             fecha_fin=("fecha", "max"),
-            nivel_min_7dias=("nivel_min_m", "min"),
-            nivel_prom_7dias=("nivel_prom_m", "mean"),
-            nivel_max_7dias=("nivel_max_m", "max"),
-            nivel_inicio=("nivel_prom_m", "first"),
-            nivel_fin=("nivel_prom_m", "last"),
+            nivel_min_7dias=(col_min, "min"),
+            nivel_prom_7dias=(col_prom, "mean"),
+            nivel_max_7dias=(col_max, "max"),
+            nivel_inicio=(col_prom, "first"),
+            nivel_fin=(col_prom, "last"),
         )
         .reset_index()
     )
@@ -361,15 +380,31 @@ def obtener_pronostico_estacion(pron_est: pd.DataFrame) -> pd.DataFrame:
 
     pron_est = pron_est.copy()
 
-    for col in [
+    columnas_nivel = [
+        "nivel_min_ajustado_m",
+        "nivel_p25_ajustado_m",
+        "nivel_prom_ajustado_m",
+        "nivel_p75_ajustado_m",
+        "nivel_max_ajustado_m",
+        "nivel_eta_eqm_ajustado_m",
+        "nivel_eta_scal_ajustado_m",
+        "nivel_gfs_ajustado_m",
+        "nivel_wrf_ajustado_m",
         "nivel_min_m",
+        "nivel_p25_m",
         "nivel_prom_m",
+        "nivel_p75_m",
         "nivel_max_m",
         "nivel_eta_eqm_m",
         "nivel_eta_scal_m",
         "nivel_gfs_m",
         "nivel_wrf_m",
-    ]:
+        "offset_ajuste_m",
+        "nivel_obs_ajuste_m",
+        "dias_desde_obs_ajuste",
+    ]
+
+    for col in columnas_nivel:
         if col in pron_est.columns:
             pron_est[col] = pd.to_numeric(pron_est[col], errors="coerce")
 
@@ -736,6 +771,24 @@ with col_panel:
         nivel_obs_reciente = obs_5dias["nivel_m"].iloc[-1]
         fecha_obs_reciente = obs_5dias["fecha"].iloc[-1]
 
+    col_prom_plot = (
+        "nivel_prom_ajustado_m"
+        if "nivel_prom_ajustado_m" in pron_est.columns
+        else "nivel_prom_m"
+    )
+
+    col_min_plot = (
+        "nivel_min_ajustado_m"
+        if "nivel_min_ajustado_m" in pron_est.columns
+        else "nivel_min_m"
+    )
+
+    col_max_plot = (
+        "nivel_max_ajustado_m"
+        if "nivel_max_ajustado_m" in pron_est.columns
+        else "nivel_max_m"
+    )
+
     nivel_inicio = None
     nivel_fin = None
     nivel_min = None
@@ -743,16 +796,16 @@ with col_panel:
     tendencia_val = None
 
     if not pron_est.empty:
-        if "nivel_prom_m" in pron_est.columns:
-            nivel_inicio = pron_est["nivel_prom_m"].iloc[0]
-            nivel_fin = pron_est["nivel_prom_m"].iloc[-1]
+        if col_prom_plot in pron_est.columns:
+            nivel_inicio = pron_est[col_prom_plot].iloc[0]
+            nivel_fin = pron_est[col_prom_plot].iloc[-1]
             tendencia_val = nivel_fin - nivel_inicio
 
-        if "nivel_min_m" in pron_est.columns:
-            nivel_min = pron_est["nivel_min_m"].min()
+        if col_min_plot in pron_est.columns:
+            nivel_min = pron_est[col_min_plot].min()
 
-        if "nivel_max_m" in pron_est.columns:
-            nivel_max = pron_est["nivel_max_m"].max()
+        if col_max_plot in pron_est.columns:
+            nivel_max = pron_est[col_max_plot].max()
 
     kge = None
     rmse = None
@@ -773,9 +826,9 @@ with col_panel:
     )
 
     k2.metric(
-        "Nivel pronosticado promedio",
+        "Nivel pronosticado ajustado",
         f"{formato_num(nivel_fin)} m",
-        help="Nivel promedio pronosticado al final del horizonte.",
+        help="Nivel promedio ajustado al final del horizonte.",
     )
 
     k3.metric(
@@ -792,11 +845,11 @@ with col_panel:
 
     if fecha_obs_reciente is not None:
         st.caption(
-            f"Última observación usada: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')}"
+            f"Última observación usada en gráfico: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')}"
         )
 
     st.markdown(
-        '<div class="section-title">Observado reciente + pronóstico de 7 días</div>',
+        '<div class="section-title">Observado reciente + pronóstico ajustado de 7 días</div>',
         unsafe_allow_html=True,
     )
 
@@ -815,25 +868,25 @@ with col_panel:
         )
 
     if not pron_est.empty:
-        if "nivel_prom_m" in pron_est.columns:
+        if col_prom_plot in pron_est.columns:
             fig.add_trace(
                 go.Scatter(
                     x=pron_est["fecha"],
-                    y=pron_est["nivel_prom_m"],
+                    y=pron_est[col_prom_plot],
                     mode="lines+markers",
-                    name="Pronóstico medio",
+                    name="Pronóstico medio ajustado",
                     line=dict(width=3),
                     marker=dict(size=8),
                 )
             )
 
-        if {"nivel_min_m", "nivel_max_m"}.issubset(pron_est.columns):
+        if {col_min_plot, col_max_plot}.issubset(pron_est.columns):
             fig.add_trace(
                 go.Scatter(
                     x=pron_est["fecha"],
-                    y=pron_est["nivel_max_m"],
+                    y=pron_est[col_max_plot],
                     mode="lines",
-                    name="Máximo pronosticado",
+                    name="Máximo ajustado",
                     line=dict(width=1, dash="dot"),
                 )
             )
@@ -841,9 +894,9 @@ with col_panel:
             fig.add_trace(
                 go.Scatter(
                     x=pron_est["fecha"],
-                    y=pron_est["nivel_min_m"],
+                    y=pron_est[col_min_plot],
                     mode="lines",
-                    name="Mínimo pronosticado",
+                    name="Mínimo ajustado",
                     line=dict(width=1, dash="dot"),
                     fill="tonexty",
                     fillcolor="rgba(37, 99, 235, 0.15)",
@@ -894,7 +947,7 @@ with col_panel:
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "El gráfico muestra los 5 días observados previos al pronóstico y luego el pronóstico DWLT de 7 días."
+        "El gráfico muestra los 5 días observados previos y el pronóstico DWLT ajustado por continuidad al último observado."
     )
 
     col_tabla, col_resumen = st.columns([1.45, 1.0], gap="large")
@@ -907,13 +960,22 @@ with col_panel:
 
         cols_pron = [
             "fecha",
+            "nivel_prom_ajustado_m",
+            "nivel_min_ajustado_m",
+            "nivel_max_ajustado_m",
+            "nivel_p25_ajustado_m",
+            "nivel_p75_ajustado_m",
             "nivel_prom_m",
             "nivel_min_m",
             "nivel_max_m",
-            "nivel_eta_eqm_m",
-            "nivel_eta_scal_m",
-            "nivel_gfs_m",
-            "nivel_wrf_m",
+            "nivel_p25_m",
+            "nivel_p75_m",
+            "ajuste_continuidad",
+            "offset_ajuste_m",
+            "fecha_obs_ajuste_texto",
+            "nivel_obs_ajuste_m",
+            "dias_desde_obs_ajuste",
+            "advertencia_ajuste",
         ]
 
         cols_pron = [c for c in cols_pron if c in pron_est.columns]
@@ -921,7 +983,7 @@ with col_panel:
         tabla_pron = pron_est[cols_pron].copy()
 
         for c in tabla_pron.columns:
-            if c.startswith("nivel_"):
+            if c.startswith("nivel_") or c == "offset_ajuste_m":
                 tabla_pron[c] = pd.to_numeric(tabla_pron[c], errors="coerce").round(3)
 
         st.dataframe(
@@ -936,14 +998,52 @@ with col_panel:
             unsafe_allow_html=True,
         )
 
+        ajuste_txt = "Sin dato"
+        offset_txt = "Sin dato"
+        fecha_obs_ajuste_txt = "Sin dato"
+        nivel_obs_ajuste_txt = "Sin dato"
+        dias_obs_txt = "Sin dato"
+        advertencia_txt = ""
+
+        if not pron_est.empty:
+            if "ajuste_continuidad" in pron_est.columns:
+                ajuste_txt = str(pron_est["ajuste_continuidad"].iloc[0])
+
+            if "offset_ajuste_m" in pron_est.columns:
+                offset_txt = formato_num(pron_est["offset_ajuste_m"].iloc[0], 3)
+
+            if "fecha_obs_ajuste_texto" in pron_est.columns:
+                fecha_obs_ajuste_txt = str(pron_est["fecha_obs_ajuste_texto"].iloc[0])
+            elif "fecha_obs_ajuste" in pron_est.columns:
+                fecha_tmp = pd.to_datetime(pron_est["fecha_obs_ajuste"].iloc[0], errors="coerce")
+                if pd.notna(fecha_tmp):
+                    fecha_obs_ajuste_txt = fecha_tmp.strftime("%d/%m/%Y")
+
+            if "nivel_obs_ajuste_m" in pron_est.columns:
+                nivel_obs_ajuste_txt = f"{formato_num(pron_est['nivel_obs_ajuste_m'].iloc[0])} m"
+
+            if "dias_desde_obs_ajuste" in pron_est.columns:
+                dias_obs_txt = formato_num(pron_est["dias_desde_obs_ajuste"].iloc[0], 0)
+
+            if "advertencia_ajuste" in pron_est.columns:
+                advertencia_txt = str(pron_est["advertencia_ajuste"].iloc[0])
+
         st.write(f"**COMID:** {int(comid_sel) if comid_sel is not None else 'Sin dato'}")
-        st.write(f"**Nivel mínimo 7 días:** {formato_num(nivel_min)} m")
-        st.write(f"**Nivel máximo 7 días:** {formato_num(nivel_max)} m")
-        st.write(f"**Cambio esperado:** {formato_num(tendencia_val)} m")
+        st.write(f"**Nivel mínimo 7 días ajustado:** {formato_num(nivel_min)} m")
+        st.write(f"**Nivel máximo 7 días ajustado:** {formato_num(nivel_max)} m")
+        st.write(f"**Cambio esperado ajustado:** {formato_num(tendencia_val)} m")
         st.write(f"**Tendencia:** {clasificar_tendencia(tendencia_val)}")
         st.write(f"**Calidad DWLT:** {clasificar_calidad(kge)}")
+        st.write(f"**Ajuste de continuidad:** {ajuste_txt}")
+        st.write(f"**Offset aplicado:** {offset_txt} m")
+        st.write(f"**Fecha observada usada:** {fecha_obs_ajuste_txt}")
+        st.write(f"**Nivel observado usado:** {nivel_obs_ajuste_txt}")
+        st.write(f"**Días desde observado:** {dias_obs_txt}")
 
-        st.info("Los niveles corresponden al datum local de cada estación hidrométrica.")
+        if advertencia_txt:
+            st.warning(advertencia_txt)
+        else:
+            st.info("Los niveles corresponden al datum local de cada estación hidrométrica.")
 
     st.markdown(
         '<div class="section-title">Validación reciente DWLT vs observado</div>',
@@ -975,7 +1075,7 @@ with col_panel:
                     x=valid_est["fecha"],
                     y=valid_est["nivel_dwlt_m"],
                     mode="lines+markers",
-                    name="Nivel DWLT",
+                    name="Nivel DWLT bruto",
                     line=dict(width=3),
                 )
             )

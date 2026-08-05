@@ -30,9 +30,7 @@ CACHE_DIR = BASE_DIR / "backend" / "cache"
 GPKG_FILE = DATA_DIR / "estaciones_hidrometricas_loreto_latlong_COMID_actualizado.gpkg"
 
 PRONOSTICO_CSV = OUTPUT_DIR / "pronostico_nivel_7dias_estaciones.csv"
-VALIDACION_CSV = OUTPUT_DIR / "validacion_dwlt_hasta_observado_disponible.csv"
 DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
-
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
@@ -63,11 +61,6 @@ st.markdown(
         color: #0f172a;
         margin-top: 0.5rem;
         margin-bottom: 0.5rem;
-    }
-
-    .small-note {
-        color: #64748b;
-        font-size: 0.85rem;
     }
 
     .stMetric {
@@ -173,18 +166,6 @@ def convertir_fechas(df: pd.DataFrame) -> pd.DataFrame:
             errors="coerce",
         )
 
-    if "fecha_inicio_pronostico" in df.columns:
-        df["fecha_inicio_pronostico"] = pd.to_datetime(
-            df["fecha_inicio_pronostico"],
-            errors="coerce",
-        )
-
-    if "fecha_obs_usada" in df.columns:
-        df["fecha_obs_usada"] = pd.to_datetime(
-            df["fecha_obs_usada"],
-            errors="coerce",
-        )
-
     return df
 
 
@@ -229,7 +210,7 @@ def convertir_numericos(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# LECTURA DE ARCHIVOS
+# CARGA DE ARCHIVOS
 # ============================================================
 
 @st.cache_data(show_spinner=False)
@@ -267,13 +248,6 @@ def cargar_estaciones_gpkg(gpkg_path: str) -> pd.DataFrame:
 
     df = normalizar_columnas(df)
 
-    requeridas = ["estacion", "comid", "latitud", "longitud"]
-    faltan = [c for c in requeridas if c not in df.columns]
-
-    if faltan:
-        st.error("El GPKG no tiene columnas requeridas: " + ", ".join(faltan))
-        return pd.DataFrame()
-
     out = pd.DataFrame({
         "estacion": df["estacion"].astype(str).str.strip(),
         "estacion_norm": df["estacion"].apply(normalizar_texto),
@@ -300,10 +274,6 @@ def cargar_estaciones_gpkg(gpkg_path: str) -> pd.DataFrame:
 
 
 def cargar_csv_sin_cache(path: Path) -> pd.DataFrame:
-    """
-    Se lee sin cache para evitar que Streamlit muestre un CSV antiguo.
-    """
-
     if not path.exists():
         return pd.DataFrame()
 
@@ -321,10 +291,6 @@ def cargar_csv_sin_cache(path: Path) -> pd.DataFrame:
 
 
 def cargar_parquet_sin_cache(path: Path) -> pd.DataFrame:
-    """
-    Se lee sin cache para evitar resultados antiguos.
-    """
-
     if not path.exists():
         return pd.DataFrame()
 
@@ -342,7 +308,7 @@ def cargar_parquet_sin_cache(path: Path) -> pd.DataFrame:
 
 
 # ============================================================
-# FUNCIONES DE PROCESAMIENTO
+# VALIDACIONES Y PROCESOS
 # ============================================================
 
 def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
@@ -360,26 +326,18 @@ def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
 
     if faltantes:
         st.error(
-            "El archivo de pronóstico no tiene las columnas ajustadas necesarias. "
-            "Eso significa que Streamlit está leyendo un CSV antiguo o el script 04 no se ejecutó correctamente."
+            "El archivo de pronóstico no tiene columnas ajustadas. "
+            "Ejecuta primero el workflow con el script 04 corregido."
         )
-
         st.write("Columnas faltantes:")
         st.write(faltantes)
-
-        st.write("Columnas disponibles en el CSV:")
+        st.write("Columnas disponibles:")
         st.write(list(pron.columns))
-
         st.stop()
 
 
 def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     if pron.empty:
-        return pd.DataFrame()
-
-    requeridas = {"estacion", "comid", "fecha"}
-
-    if not requeridas.issubset(set(pron.columns)):
         return pd.DataFrame()
 
     resumen = (
@@ -446,11 +404,8 @@ def crear_mapa_estaciones(
             control_scale=True,
         )
 
-    lat_centro = estaciones["lat"].mean()
-    lon_centro = estaciones["lon"].mean()
-
     mapa = folium.Map(
-        location=[lat_centro, lon_centro],
+        location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
         zoom_start=6,
         tiles="CartoDB positron",
         control_scale=True,
@@ -466,13 +421,7 @@ def crear_mapa_estaciones(
             continue
 
         comid_int = int(comid)
-
-        seleccionado = False
-
-        if comid_sel is not None and pd.notna(comid_sel):
-            seleccionado = comid_int == int(comid_sel)
-        else:
-            seleccionado = estacion == estacion_sel
+        seleccionado = comid_sel is not None and comid_int == int(comid_sel)
 
         color = "red" if seleccionado else "blue"
         radio = 9 if seleccionado else 6
@@ -501,13 +450,18 @@ def crear_mapa_estaciones(
         <b>{estacion}</b><br>
         <b>COMID:</b> {comid_int}
         {info_extra}
+        <br><br><i>Haz click para seleccionar esta estación.</i>
         """
+
+        # Tooltip estructurado para capturar click:
+        # ESTACION||COMID
+        tooltip_val = f"{estacion}||{comid_int}"
 
         folium.CircleMarker(
             location=[lat, lon],
             radius=radio,
             popup=folium.Popup(popup_html, max_width=300),
-            tooltip=f"{estacion} | COMID {comid_int}",
+            tooltip=tooltip_val,
             color=color,
             fill=True,
             fill_opacity=0.85,
@@ -521,11 +475,8 @@ def crear_mapa_estaciones(
 # ============================================================
 
 estaciones = cargar_estaciones_gpkg(str(GPKG_FILE))
-
 pron = cargar_csv_sin_cache(PRONOSTICO_CSV)
-valid = cargar_csv_sin_cache(VALIDACION_CSV)
 diagnostico = cargar_csv_sin_cache(DIAGNOSTICO_CSV)
-
 metricas = cargar_parquet_sin_cache(METRICAS_PARQUET)
 obs = cargar_parquet_sin_cache(OBS_PARQUET)
 
@@ -549,7 +500,7 @@ st.markdown(
 
 
 # ============================================================
-# VALIDACIÓN DE ARCHIVOS
+# VALIDACIÓN
 # ============================================================
 
 faltantes = []
@@ -578,7 +529,7 @@ pron_resumen = preparar_resumen_pronostico(pron)
 
 
 # ============================================================
-# ESTACIONES DISPONIBLES
+# ESTACIONES
 # ============================================================
 
 estaciones_disponibles = sorted(pron["estacion"].dropna().astype(str).unique().tolist())
@@ -594,20 +545,18 @@ tabla_estaciones_pron = (
     .copy()
 )
 
-tabla_estaciones_pron["comid"] = pd.to_numeric(
-    tabla_estaciones_pron["comid"],
-    errors="coerce",
-)
-
+tabla_estaciones_pron["comid"] = pd.to_numeric(tabla_estaciones_pron["comid"], errors="coerce")
 tabla_estaciones_pron = tabla_estaciones_pron.dropna(subset=["comid"]).copy()
 tabla_estaciones_pron["comid"] = tabla_estaciones_pron["comid"].astype("int64")
 
-estacion_a_comid = dict(
-    zip(tabla_estaciones_pron["estacion"], tabla_estaciones_pron["comid"])
-)
+estacion_a_comid = dict(zip(tabla_estaciones_pron["estacion"], tabla_estaciones_pron["comid"]))
+comid_a_estacion = dict(zip(tabla_estaciones_pron["comid"], tabla_estaciones_pron["estacion"]))
 
 if "estacion_sel" not in st.session_state:
     st.session_state.estacion_sel = estaciones_disponibles[0]
+
+if "ultimo_click_comid" not in st.session_state:
+    st.session_state.ultimo_click_comid = None
 
 if st.session_state.estacion_sel not in estaciones_disponibles:
     st.session_state.estacion_sel = estaciones_disponibles[0]
@@ -630,19 +579,14 @@ with st.sidebar:
     )
 
     st.session_state.estacion_sel = estacion_sidebar
-    estacion_sel = estacion_sidebar
-
-    mostrar_tablas = st.checkbox("Mostrar tablas completas", value=False)
-    mostrar_diagnostico = st.checkbox("Mostrar diagnóstico de ajuste", value=True)
 
     st.markdown("---")
     st.subheader("Archivos cargados")
 
     checks = {
         "GPKG estaciones": not estaciones.empty,
-        "pronóstico 7 días CSV": not pron.empty,
+        "pronóstico ajustado CSV": not pron.empty,
         "diagnóstico ajuste CSV": not diagnostico.empty,
-        "validación CSV": not valid.empty,
         "métricas Parquet": not metricas.empty,
         "observado Parquet": not obs.empty,
     }
@@ -650,8 +594,7 @@ with st.sidebar:
     for nombre, ok in checks.items():
         st.write(("✅ " if ok else "❌ ") + nombre)
 
-    st.markdown("---")
-    st.caption("El visor lee el CSV sin cache para evitar mostrar datos antiguos.")
+    st.caption("Puedes seleccionar estaciones desde el selector o haciendo click en el mapa.")
 
 
 # ============================================================
@@ -673,9 +616,7 @@ elif not pron_est.empty and "comid" in pron_est.columns:
         comid_sel = int(valores_comid.iloc[0])
 
 metricas_est = pd.DataFrame()
-valid_est = pd.DataFrame()
 obs_est = pd.DataFrame()
-diagnostico_est = pd.DataFrame()
 estacion_map_est = pd.DataFrame()
 
 if comid_sel is not None:
@@ -685,21 +626,9 @@ if comid_sel is not None:
         else pd.DataFrame()
     )
 
-    valid_est = (
-        valid[pd.to_numeric(valid["comid"], errors="coerce") == float(comid_sel)].copy()
-        if not valid.empty and "comid" in valid.columns
-        else pd.DataFrame()
-    )
-
     obs_est = (
         obs[pd.to_numeric(obs["comid"], errors="coerce") == float(comid_sel)].copy()
         if not obs.empty and "comid" in obs.columns
-        else pd.DataFrame()
-    )
-
-    diagnostico_est = (
-        diagnostico[pd.to_numeric(diagnostico["comid"], errors="coerce") == float(comid_sel)].copy()
-        if not diagnostico.empty and "comid" in diagnostico.columns
         else pd.DataFrame()
     )
 
@@ -741,13 +670,38 @@ with col_mapa:
         pron_resumen=pron_resumen,
     )
 
-    st_folium(
+    mapa_evento = st_folium(
         mapa,
         width=520,
         height=650,
-        key="mapa_estaciones_estable",
-        returned_objects=[],
+        key="mapa_estaciones_click",
+        returned_objects=["last_object_clicked_tooltip"],
     )
+
+    tooltip_click = None
+
+    if mapa_evento:
+        tooltip_click = mapa_evento.get("last_object_clicked_tooltip")
+
+    if tooltip_click and "||" in tooltip_click:
+        _, comid_click_txt = tooltip_click.split("||", 1)
+
+        try:
+            comid_click = int(float(comid_click_txt))
+
+            if (
+                comid_click in comid_a_estacion
+                and comid_click != st.session_state.ultimo_click_comid
+            ):
+                nueva_estacion = comid_a_estacion[comid_click]
+
+                st.session_state.ultimo_click_comid = comid_click
+                st.session_state.estacion_sel = nueva_estacion
+
+                st.rerun()
+
+        except Exception:
+            pass
 
     st.markdown("**Leyenda**")
     st.markdown(
@@ -810,25 +764,6 @@ with col_panel:
         if "rmse_m" in metricas_est.columns:
             rmse = metricas_est["rmse_m"].iloc[0]
 
-    ajuste_txt = "Sin dato"
-    offset_txt = "Sin dato"
-    advertencia_txt = ""
-    nivel_obs_ajuste_txt = "Sin dato"
-    fecha_obs_ajuste_txt = "Sin dato"
-
-    if not pron_est.empty:
-        ajuste_txt = str(pron_est["ajuste_continuidad"].iloc[0])
-        offset_txt = formato_num(pron_est["offset_ajuste_m"].iloc[0], 3)
-        advertencia_txt = str(pron_est["advertencia_ajuste"].iloc[0])
-        nivel_obs_ajuste_txt = formato_num(pron_est["nivel_obs_ajuste_m"].iloc[0], 3)
-
-        if "fecha_obs_ajuste_texto" in pron_est.columns:
-            fecha_obs_ajuste_txt = str(pron_est["fecha_obs_ajuste_texto"].iloc[0])
-        elif "fecha_obs_ajuste" in pron_est.columns:
-            fecha_tmp = pd.to_datetime(pron_est["fecha_obs_ajuste"].iloc[0], errors="coerce")
-            if pd.notna(fecha_tmp):
-                fecha_obs_ajuste_txt = fecha_tmp.strftime("%d/%m/%Y")
-
     k1, k2, k3, k4 = st.columns(4)
 
     k1.metric(
@@ -855,48 +790,9 @@ with col_panel:
         delta=f"KGE {formato_num(kge, 3)} | RMSE {formato_num(rmse, 3)} m",
     )
 
-    st.caption(
-        f"Ajuste de continuidad: {ajuste_txt} | "
-        f"Offset aplicado: {offset_txt} m | "
-        f"Nivel observado usado: {nivel_obs_ajuste_txt} m | "
-        f"Fecha observada usada: {fecha_obs_ajuste_txt}"
-    )
-
     if fecha_obs_reciente is not None:
         st.caption(
             f"Última observación usada en gráfico: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')}"
-        )
-
-    if advertencia_txt and advertencia_txt != "Ajuste aplicado":
-        st.warning(advertencia_txt)
-
-    if mostrar_diagnostico and not diagnostico_est.empty:
-        st.markdown(
-            '<div class="section-title">Diagnóstico de ajuste de continuidad</div>',
-            unsafe_allow_html=True,
-        )
-
-        cols_diag = [
-            "estacion",
-            "comid",
-            "fecha_inicio_pronostico",
-            "fecha_obs_usada",
-            "nivel_obs_usado",
-            "primer_nivel_bruto",
-            "offset_aplicado",
-            "primer_nivel_ajustado",
-            "diferencia_control_m",
-            "dias_desde_obs",
-            "ajuste_continuidad",
-            "advertencia_ajuste",
-        ]
-
-        cols_diag = [c for c in cols_diag if c in diagnostico_est.columns]
-
-        st.dataframe(
-            diagnostico_est[cols_diag],
-            use_container_width=True,
-            hide_index=True,
         )
 
     st.markdown(
@@ -905,6 +801,10 @@ with col_panel:
     )
 
     fig = go.Figure()
+
+    # --------------------------------------------------------
+    # Observado
+    # --------------------------------------------------------
 
     if not obs_5dias.empty:
         fig.add_trace(
@@ -917,6 +817,33 @@ with col_panel:
                 marker=dict(size=8),
             )
         )
+
+    # --------------------------------------------------------
+    # Línea de conexión entre observado y pronóstico
+    # --------------------------------------------------------
+
+    if not obs_5dias.empty and not pron_est.empty:
+        ultimo_obs_fecha = obs_5dias["fecha"].iloc[-1]
+        ultimo_obs_nivel = obs_5dias["nivel_m"].iloc[-1]
+
+        primer_pron_fecha = pron_est["fecha"].iloc[0]
+        primer_pron_nivel = pron_est["nivel_prom_ajustado_m"].iloc[0]
+
+        fig.add_trace(
+            go.Scatter(
+                x=[ultimo_obs_fecha, primer_pron_fecha],
+                y=[ultimo_obs_nivel, primer_pron_nivel],
+                mode="lines",
+                name="Conexión observado-pronóstico",
+                line=dict(width=3, color="black"),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Pronóstico ajustado
+    # --------------------------------------------------------
 
     if not pron_est.empty:
         fig.add_trace(
@@ -937,6 +864,7 @@ with col_panel:
                 mode="lines",
                 name="Máximo ajustado",
                 line=dict(width=1, dash="dot"),
+                visible="legendonly",
             )
         )
 
@@ -947,10 +875,13 @@ with col_panel:
                 mode="lines",
                 name="Mínimo ajustado",
                 line=dict(width=1, dash="dot"),
-                fill="tonexty",
-                fillcolor="rgba(37, 99, 235, 0.15)",
+                visible="legendonly",
             )
         )
+
+    # --------------------------------------------------------
+    # Línea vertical de inicio de pronóstico
+    # --------------------------------------------------------
 
     if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
         fecha_corte = pd.to_datetime(fecha_inicio_pron)
@@ -989,199 +920,6 @@ with col_panel:
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "El gráfico usa obligatoriamente las columnas ajustadas: "
-        "nivel_prom_ajustado_m, nivel_min_ajustado_m y nivel_max_ajustado_m."
+        "La línea negra observada se conecta con el primer punto del pronóstico ajustado. "
+        "Las bandas mínima y máxima están apagadas por defecto y pueden activarse desde la leyenda."
     )
-
-    col_tabla, col_resumen = st.columns([1.45, 1.0], gap="large")
-
-    with col_tabla:
-        st.markdown(
-            '<div class="section-title">Pronóstico de niveles - 7 días</div>',
-            unsafe_allow_html=True,
-        )
-
-        cols_pron = [
-            "fecha",
-            "fecha_texto",
-            "nivel_prom_ajustado_m",
-            "nivel_min_ajustado_m",
-            "nivel_max_ajustado_m",
-            "nivel_p25_ajustado_m",
-            "nivel_p75_ajustado_m",
-            "nivel_prom_m",
-            "nivel_min_m",
-            "nivel_max_m",
-            "nivel_p25_m",
-            "nivel_p75_m",
-            "ajuste_continuidad",
-            "offset_ajuste_m",
-            "fecha_obs_ajuste_texto",
-            "nivel_obs_ajuste_m",
-            "dias_desde_obs_ajuste",
-            "advertencia_ajuste",
-        ]
-
-        cols_pron = [c for c in cols_pron if c in pron_est.columns]
-
-        tabla_pron = pron_est[cols_pron].copy()
-
-        for c in tabla_pron.columns:
-            if c.startswith("nivel_") or c == "offset_ajuste_m":
-                tabla_pron[c] = pd.to_numeric(tabla_pron[c], errors="coerce").round(3)
-
-        st.dataframe(
-            tabla_pron,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    with col_resumen:
-        st.markdown(
-            '<div class="section-title">Resumen de pronóstico</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.write(f"**COMID:** {int(comid_sel) if comid_sel is not None else 'Sin dato'}")
-        st.write(f"**Nivel mínimo 7 días ajustado:** {formato_num(nivel_min)} m")
-        st.write(f"**Nivel máximo 7 días ajustado:** {formato_num(nivel_max)} m")
-        st.write(f"**Cambio esperado ajustado:** {formato_num(tendencia_val)} m")
-        st.write(f"**Tendencia:** {clasificar_tendencia(tendencia_val)}")
-        st.write(f"**Calidad DWLT:** {clasificar_calidad(kge)}")
-        st.write(f"**Ajuste de continuidad:** {ajuste_txt}")
-        st.write(f"**Offset aplicado:** {offset_txt} m")
-        st.write(f"**Fecha observada usada:** {fecha_obs_ajuste_txt}")
-        st.write(f"**Nivel observado usado:** {nivel_obs_ajuste_txt} m")
-
-        if advertencia_txt:
-            st.warning(advertencia_txt)
-        else:
-            st.info("Los niveles corresponden al datum local de cada estación hidrométrica.")
-
-    st.markdown(
-        '<div class="section-title">Validación reciente DWLT vs observado</div>',
-        unsafe_allow_html=True,
-    )
-
-    if valid_est.empty:
-        st.info("No hay validación reciente para esta estación.")
-    else:
-        valid_est = valid_est.sort_values("fecha").copy()
-
-        fig_val = go.Figure()
-
-        if "nivel_observado_m" in valid_est.columns:
-            fig_val.add_trace(
-                go.Scatter(
-                    x=valid_est["fecha"],
-                    y=valid_est["nivel_observado_m"],
-                    mode="lines+markers",
-                    name="Nivel observado",
-                    line=dict(width=3),
-                )
-            )
-
-        if "nivel_dwlt_m" in valid_est.columns:
-            fig_val.add_trace(
-                go.Scatter(
-                    x=valid_est["fecha"],
-                    y=valid_est["nivel_dwlt_m"],
-                    mode="lines+markers",
-                    name="Nivel DWLT bruto",
-                    line=dict(width=3),
-                )
-            )
-
-        fig_val.update_layout(
-            height=330,
-            margin=dict(l=20, r=20, t=30, b=20),
-            xaxis_title="Fecha",
-            yaxis_title="Nivel (m)",
-            legend_title="Serie",
-            hovermode="x unified",
-        )
-
-        st.plotly_chart(fig_val, use_container_width=True)
-
-        cols_valid = [
-            "fecha",
-            "nivel_observado_m",
-            "nivel_dwlt_m",
-            "error_m",
-            "error_abs_m",
-            "tendencia_obs",
-            "tendencia_dwlt",
-            "coincide_tendencia",
-        ]
-
-        cols_valid = [c for c in cols_valid if c in valid_est.columns]
-
-        st.dataframe(
-            valid_est[cols_valid],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    if mostrar_tablas:
-        st.markdown(
-            '<div class="section-title">Tablas completas</div>',
-            unsafe_allow_html=True,
-        )
-
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            [
-                "Pronóstico",
-                "Diagnóstico ajuste",
-                "Validación",
-                "Métricas",
-                "Observado",
-            ]
-        )
-
-        with tab1:
-            st.dataframe(pron_est, use_container_width=True, hide_index=True)
-
-        with tab2:
-            st.dataframe(diagnostico_est, use_container_width=True, hide_index=True)
-
-        with tab3:
-            st.dataframe(valid_est, use_container_width=True, hide_index=True)
-
-        with tab4:
-            st.dataframe(metricas_est, use_container_width=True, hide_index=True)
-
-        with tab5:
-            obs_show = obs_est.sort_values("fecha").tail(90).copy() if not obs_est.empty else pd.DataFrame()
-            st.dataframe(obs_show, use_container_width=True, hide_index=True)
-
-    st.markdown(
-        '<div class="section-title">Descargas</div>',
-        unsafe_allow_html=True,
-    )
-
-    d1, d2, d3 = st.columns(3)
-
-    with d1:
-        st.download_button(
-            label="Descargar pronóstico CSV",
-            data=pron.to_csv(index=False, encoding="utf-8-sig"),
-            file_name="pronostico_nivel_7dias_estaciones.csv",
-            mime="text/csv",
-        )
-
-    with d2:
-        st.download_button(
-            label="Descargar diagnóstico ajuste CSV",
-            data=diagnostico.to_csv(index=False, encoding="utf-8-sig"),
-            file_name="diagnostico_ajuste_continuidad.csv",
-            mime="text/csv",
-        )
-
-    with d3:
-        if not valid.empty:
-            st.download_button(
-                label="Descargar validación CSV",
-                data=valid.to_csv(index=False, encoding="utf-8-sig"),
-                file_name="validacion_dwlt_hasta_observado_disponible.csv",
-                mime="text/csv",
-            )

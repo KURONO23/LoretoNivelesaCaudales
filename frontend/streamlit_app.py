@@ -34,6 +34,11 @@ DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
+# Observado para gráfico.
+# Solo se grafica observado si el último dato está cerca del inicio del pronóstico.
+DIAS_OBS_GRAFICO = 5
+MAX_DIAS_OBS_GRAFICO = 7
+
 
 # ============================================================
 # ESTILOS
@@ -316,6 +321,7 @@ def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
         "nivel_prom_ajustado_m",
         "nivel_min_ajustado_m",
         "nivel_max_ajustado_m",
+        "nivel_prom_m",
         "ajuste_continuidad",
         "offset_ajuste_m",
         "nivel_obs_ajuste_m",
@@ -326,7 +332,7 @@ def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
 
     if faltantes:
         st.error(
-            "El archivo de pronóstico no tiene columnas ajustadas. "
+            "El archivo de pronóstico no tiene las columnas necesarias. "
             "Ejecuta primero el workflow con el script 04 corregido."
         )
         st.write("Columnas faltantes:")
@@ -364,12 +370,26 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     return resumen
 
 
-def obtener_observado_5dias_previos(
+def obtener_observado_reciente_para_grafico(
     obs_est: pd.DataFrame,
     fecha_inicio_pronostico,
-) -> pd.DataFrame:
+    dias_obs: int = DIAS_OBS_GRAFICO,
+    max_dias_antiguedad: int = MAX_DIAS_OBS_GRAFICO,
+) -> tuple[pd.DataFrame, bool, str]:
+    """
+    Devuelve observado reciente para graficar.
+
+    Reglas:
+    - Solo usa observado antes del inicio del pronóstico.
+    - Si el último observado antes del pronóstico está muy antiguo, no grafica observado.
+    - Si hay menos de 5 días disponibles dentro de la ventana, grafica solo lo disponible.
+    """
+
     if obs_est.empty or "fecha" not in obs_est.columns or "nivel_m" not in obs_est.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), False, "Sin datos observados"
+
+    if fecha_inicio_pronostico is None or pd.isna(fecha_inicio_pronostico):
+        return pd.DataFrame(), False, "Sin fecha de inicio de pronóstico"
 
     obs_est = obs_est.dropna(subset=["fecha", "nivel_m"]).copy()
     obs_est = obs_est.sort_values("fecha")
@@ -378,12 +398,34 @@ def obtener_observado_5dias_previos(
         obs_est.groupby("fecha", dropna=False)
         .agg(nivel_m=("nivel_m", "mean"))
         .reset_index()
+        .sort_values("fecha")
     )
 
-    if fecha_inicio_pronostico is not None and pd.notna(fecha_inicio_pronostico):
-        obs_diario = obs_diario[obs_diario["fecha"] < fecha_inicio_pronostico].copy()
+    obs_prev = obs_diario[obs_diario["fecha"] < fecha_inicio_pronostico].copy()
 
-    return obs_diario.tail(5).copy()
+    if obs_prev.empty:
+        return pd.DataFrame(), False, "Sin observado previo al pronóstico"
+
+    fecha_ult_obs = obs_prev["fecha"].max()
+    dias_desde_obs = int((fecha_inicio_pronostico - fecha_ult_obs).days)
+
+    if dias_desde_obs > max_dias_antiguedad:
+        msg = f"Observado no graficado: último dato hace {dias_desde_obs} días"
+        return pd.DataFrame(), False, msg
+
+    fecha_min = fecha_inicio_pronostico - pd.Timedelta(days=dias_obs)
+
+    obs_plot = obs_prev[
+        (obs_prev["fecha"] >= fecha_min)
+        & (obs_prev["fecha"] < fecha_inicio_pronostico)
+    ].copy()
+
+    if obs_plot.empty:
+        obs_plot = obs_prev.tail(1).copy()
+
+    msg = f"Observado graficado: {len(obs_plot)} dato(s), último hace {dias_desde_obs} día(s)"
+
+    return obs_plot, True, msg
 
 
 # ============================================================
@@ -453,8 +495,6 @@ def crear_mapa_estaciones(
         <br><br><i>Haz click para seleccionar esta estación.</i>
         """
 
-        # Tooltip estructurado para capturar click:
-        # ESTACION||COMID
         tooltip_val = f"{estacion}||{comid_int}"
 
         folium.CircleMarker(
@@ -643,7 +683,7 @@ fecha_inicio_pron = None
 if not pron_est.empty and "fecha" in pron_est.columns:
     fecha_inicio_pron = pron_est["fecha"].min()
 
-obs_5dias = obtener_observado_5dias_previos(
+obs_plot, mostrar_obs, mensaje_obs = obtener_observado_reciente_para_grafico(
     obs_est=obs_est,
     fecha_inicio_pronostico=fecha_inicio_pron,
 )
@@ -733,14 +773,12 @@ with col_panel:
     nivel_obs_reciente = None
     fecha_obs_reciente = None
 
-    if not obs_5dias.empty:
-        nivel_obs_reciente = obs_5dias["nivel_m"].iloc[-1]
-        fecha_obs_reciente = obs_5dias["fecha"].iloc[-1]
+    if mostrar_obs and not obs_plot.empty:
+        nivel_obs_reciente = obs_plot["nivel_m"].iloc[-1]
+        fecha_obs_reciente = obs_plot["fecha"].iloc[-1]
 
     nivel_inicio = None
     nivel_fin = None
-    nivel_min = None
-    nivel_max = None
     tendencia_val = None
 
     if not pron_est.empty:
@@ -750,9 +788,6 @@ with col_panel:
             nivel_inicio = serie_prom.iloc[0]
             nivel_fin = serie_prom.iloc[-1]
             tendencia_val = nivel_fin - nivel_inicio
-
-        nivel_min = pron_est["nivel_min_ajustado_m"].min()
-        nivel_max = pron_est["nivel_max_ajustado_m"].max()
 
     kge = None
     rmse = None
@@ -769,13 +804,11 @@ with col_panel:
     k1.metric(
         "Nivel observado reciente",
         f"{formato_num(nivel_obs_reciente)} m",
-        help="Último nivel observado disponible antes del inicio del pronóstico.",
     )
 
     k2.metric(
         "Nivel pronosticado ajustado",
         f"{formato_num(nivel_fin)} m",
-        help="Nivel promedio ajustado al final del horizonte.",
     )
 
     k3.metric(
@@ -792,39 +825,42 @@ with col_panel:
 
     if fecha_obs_reciente is not None:
         st.caption(
-            f"Última observación usada en gráfico: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')}"
+            f"Última observación graficada: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')} | {mensaje_obs}"
         )
+    else:
+        st.caption(mensaje_obs)
 
     st.markdown(
-        '<div class="section-title">Observado reciente + pronóstico ajustado de 7 días</div>',
+        '<div class="section-title">Observado reciente + pronóstico original y ajustado de 7 días</div>',
         unsafe_allow_html=True,
     )
 
     fig = go.Figure()
 
     # --------------------------------------------------------
-    # Observado
+    # Observado reciente
     # --------------------------------------------------------
 
-    if not obs_5dias.empty:
+    if mostrar_obs and not obs_plot.empty:
         fig.add_trace(
             go.Scatter(
-                x=obs_5dias["fecha"],
-                y=obs_5dias["nivel_m"],
+                x=obs_plot["fecha"],
+                y=obs_plot["nivel_m"],
                 mode="lines+markers",
-                name="Observado 5 días previos",
+                name="Observado reciente",
                 line=dict(width=3, color="black"),
                 marker=dict(size=8),
             )
         )
 
     # --------------------------------------------------------
-    # Línea de conexión entre observado y pronóstico
+    # Conexión observado-pronóstico ajustado
+    # Solo si el observado es reciente.
     # --------------------------------------------------------
 
-    if not obs_5dias.empty and not pron_est.empty:
-        ultimo_obs_fecha = obs_5dias["fecha"].iloc[-1]
-        ultimo_obs_nivel = obs_5dias["nivel_m"].iloc[-1]
+    if mostrar_obs and not obs_plot.empty and not pron_est.empty:
+        ultimo_obs_fecha = obs_plot["fecha"].iloc[-1]
+        ultimo_obs_nivel = obs_plot["nivel_m"].iloc[-1]
 
         primer_pron_fecha = pron_est["fecha"].iloc[0]
         primer_pron_nivel = pron_est["nivel_prom_ajustado_m"].iloc[0]
@@ -842,6 +878,22 @@ with col_panel:
         )
 
     # --------------------------------------------------------
+    # Pronóstico original
+    # --------------------------------------------------------
+
+    if not pron_est.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_est["fecha"],
+                y=pron_est["nivel_prom_m"],
+                mode="lines+markers",
+                name="Pronóstico original",
+                line=dict(width=2, dash="dash"),
+                marker=dict(size=6),
+            )
+        )
+
+    # --------------------------------------------------------
     # Pronóstico ajustado
     # --------------------------------------------------------
 
@@ -851,7 +903,7 @@ with col_panel:
                 x=pron_est["fecha"],
                 y=pron_est["nivel_prom_ajustado_m"],
                 mode="lines+markers",
-                name="Pronóstico medio ajustado",
+                name="Pronóstico ajustado",
                 line=dict(width=3),
                 marker=dict(size=8),
             )
@@ -920,6 +972,6 @@ with col_panel:
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "La línea negra observada se conecta con el primer punto del pronóstico ajustado. "
-        "Las bandas mínima y máxima están apagadas por defecto y pueden activarse desde la leyenda."
+        "El observado solo se grafica si es reciente. Si el último observado está muy antiguo, "
+        "se muestra únicamente el pronóstico. El gráfico incluye pronóstico original y ajustado."
     )

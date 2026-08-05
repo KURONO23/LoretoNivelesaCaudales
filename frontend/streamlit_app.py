@@ -113,7 +113,7 @@ def normalizar_texto(x) -> str:
 
 
 def formato_num(x, nd: int = 2) -> str:
-    if pd.isna(x):
+    if x is None or pd.isna(x):
         return "Sin dato"
 
     try:
@@ -136,7 +136,7 @@ def clasificar_tendencia(delta: float | None) -> str:
 
 
 def clasificar_calidad(kge) -> str:
-    if pd.isna(kge):
+    if kge is None or pd.isna(kge):
         return "Sin evaluar"
 
     if kge >= 0.75:
@@ -152,147 +152,85 @@ def clasificar_calidad(kge) -> str:
 # LECTURA DIRECTA DEL GPKG
 # ============================================================
 
-def quote_sql_identifier(name: str) -> str:
-    return '"' + name.replace('"', '""') + '"'
-
-
 @st.cache_data(show_spinner=False)
-def find_table_with_comid(gpkg_path: str) -> str:
-    conn = sqlite3.connect(gpkg_path)
+def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
+    """
+    Lee directamente el GPKG de estaciones.
+
+    Requiere la tabla:
+        estaciones_latlong
+
+    Requiere columnas:
+        estacion
+        COMID
+        latitud
+        longitud
+    """
+
+    if not gpkg_path.exists():
+        st.error(f"No existe el GPKG: {gpkg_path}")
+        return pd.DataFrame()
 
     try:
-        tables_df = pd.read_sql_query(
+        conn = sqlite3.connect(str(gpkg_path))
+
+        df = pd.read_sql_query(
             """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table'
-            ORDER BY name
+            SELECT
+                estacion,
+                COMID,
+                tipo,
+                departamento,
+                provincia,
+                distrito,
+                cuenca,
+                latitud,
+                longitud
+            FROM estaciones_latlong
             """,
             conn,
         )
 
-        tables = tables_df["name"].astype(str).tolist()
-
-        excluded_prefixes = (
-            "gpkg_",
-            "sqlite_",
-            "rtree_",
-        )
-
-        for table in tables:
-            table_lower = table.lower()
-
-            if table_lower.startswith(excluded_prefixes):
-                continue
-
-            info = conn.execute(
-                f"PRAGMA table_info({quote_sql_identifier(table)})"
-            ).fetchall()
-
-            cols = [row[1] for row in info]
-            cols_lower = [c.lower() for c in cols]
-
-            if "comid" in cols_lower:
-                return table
-
-        raise ValueError("No se encontró una tabla con columna COMID en el GPKG.")
-
-    finally:
         conn.close()
 
-
-def detectar_columna_nombre(df: pd.DataFrame) -> str:
-    posibles = [
-        "estacion",
-        "estacion_nombre",
-        "estacion_catalogo",
-        "estaciones_hidro",
-        "nombre",
-        "name",
-    ]
-
-    for col in posibles:
-        if col in df.columns:
-            return col
-
-    raise ValueError(
-        "No se encontró columna de nombre de estación en el GPKG. "
-        f"Columnas disponibles: {list(df.columns)}"
-    )
-
-
-def detectar_columna_lat_lon(df: pd.DataFrame) -> tuple[str, str]:
-    posibles_lat = [
-        "lat",
-        "latitude",
-        "latitud",
-        "y",
-    ]
-
-    posibles_lon = [
-        "lon",
-        "lng",
-        "longitude",
-        "longitud",
-        "x",
-    ]
-
-    lat_col = None
-    lon_col = None
-
-    for col in posibles_lat:
-        if col in df.columns:
-            lat_col = col
-            break
-
-    for col in posibles_lon:
-        if col in df.columns:
-            lon_col = col
-            break
-
-    if lat_col and lon_col:
-        return lat_col, lon_col
-
-    raise ValueError(
-        "No se encontraron columnas de latitud/longitud en el GPKG. "
-        "El visor necesita columnas tipo lat/lon, latitud/longitud o x/y."
-    )
-
-
-@st.cache_data(show_spinner=False)
-def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
-    if not gpkg_path.exists():
+    except Exception as e:
+        st.error(f"No se pudo leer la tabla estaciones_latlong del GPKG: {e}")
         return pd.DataFrame()
-
-    table = find_table_with_comid(str(gpkg_path))
-
-    conn = sqlite3.connect(str(gpkg_path))
-
-    try:
-        query = f"SELECT * FROM {quote_sql_identifier(table)}"
-        df = pd.read_sql_query(query, conn)
-
-    finally:
-        conn.close()
 
     df = normalizar_columnas(df)
 
-    if "comid" not in df.columns:
-        raise ValueError("El GPKG debe tener columna COMID.")
+    requeridas = ["estacion", "comid", "latitud", "longitud"]
+    faltan = [c for c in requeridas if c not in df.columns]
 
-    nombre_col = detectar_columna_nombre(df)
-    lat_col, lon_col = detectar_columna_lat_lon(df)
+    if faltan:
+        st.error(
+            "El GPKG no tiene las columnas requeridas para el mapa: "
+            + ", ".join(faltan)
+        )
+        st.write("Columnas disponibles:")
+        st.write(list(df.columns))
+        return pd.DataFrame()
 
     out = pd.DataFrame({
-        "estacion": df[nombre_col].astype(str).str.strip(),
-        "estacion_norm": df[nombre_col].apply(normalizar_texto),
+        "estacion": df["estacion"].astype(str).str.strip(),
+        "estacion_norm": df["estacion"].apply(normalizar_texto),
         "comid": pd.to_numeric(df["comid"], errors="coerce"),
-        "lat": pd.to_numeric(df[lat_col], errors="coerce"),
-        "lon": pd.to_numeric(df[lon_col], errors="coerce"),
+        "lat": pd.to_numeric(df["latitud"], errors="coerce"),
+        "lon": pd.to_numeric(df["longitud"], errors="coerce"),
     })
+
+    for col in ["tipo", "departamento", "provincia", "distrito", "cuenca"]:
+        if col in df.columns:
+            out[col] = df[col]
 
     out = out.dropna(subset=["estacion", "comid", "lat", "lon"]).copy()
     out = out[out["estacion"].str.strip() != ""].copy()
+
+    if out.empty:
+        st.error(
+            "Se leyó el GPKG, pero no quedaron estaciones válidas con COMID, latitud y longitud."
+        )
+        return pd.DataFrame()
 
     out["comid"] = out["comid"].astype("int64")
 
@@ -303,7 +241,7 @@ def cargar_estaciones_gpkg(gpkg_path: Path) -> pd.DataFrame:
 
 
 # ============================================================
-# CARGA DE ARCHIVOS DE RESULTADOS
+# CARGA DE ARCHIVOS
 # ============================================================
 
 @st.cache_data(show_spinner=False)
@@ -518,7 +456,7 @@ def crear_mapa_estaciones(
 
 
 # ============================================================
-# CARGA
+# CARGA PRINCIPAL
 # ============================================================
 
 estaciones = cargar_estaciones_gpkg(GPKG_FILE)

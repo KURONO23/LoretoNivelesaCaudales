@@ -904,8 +904,8 @@ with col_panel:
                 y=pron_est["nivel_prom_ajustado_m"],
                 mode="lines+markers",
                 name="Pronóstico ajustado",
-                line=dict(width=3),
-                marker=dict(size=8),
+                line=dict(width=3, color="blue"),
+                marker=dict(size=8, color="blue"),
             )
         )
 

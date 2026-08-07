@@ -25,13 +25,8 @@ OUT_XLSX = OUTPUT_DIR / "pronostico_nivel_7dias_estaciones.xlsx"
 OUT_CSV = OUTPUT_DIR / "pronostico_nivel_7dias_estaciones.csv"
 OUT_DIAG = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
 
-# Exportar solo los primeros 7 días disponibles.
 DIAS_EXPORTAR = 7
-
-# Máxima antigüedad permitida del observado usado para anclar el pronóstico.
 MAX_DIAS_OBS_AJUSTE = 7
-
-# Si el salto necesario es mayor a este valor, se ajusta igual, pero queda marcado.
 UMBRAL_OFFSET_ADVERTENCIA_M = 1.50
 
 
@@ -53,12 +48,11 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 def nombre_columna_ajustada(col: str) -> str:
     """
     Convierte correctamente:
-        nivel_min_m      -> nivel_min_ajustado_m
-        nivel_prom_m     -> nivel_prom_ajustado_m
-        nivel_max_m      -> nivel_max_ajustado_m
-        nivel_eta_eqm_m  -> nivel_eta_eqm_ajustado_m
 
-    No usar col.replace("_m", "_ajustado_m"), porque rompe nivel_min_m.
+    nivel_min_m      -> nivel_min_ajustado_m
+    nivel_prom_m     -> nivel_prom_ajustado_m
+    nivel_max_m      -> nivel_max_ajustado_m
+    nivel_eta_eqm_m  -> nivel_eta_eqm_ajustado_m
     """
 
     if col.endswith("_m"):
@@ -140,12 +134,12 @@ def aplicar_ajuste_continuidad(
     Aplica ajuste por continuidad estación por estación.
 
     Fórmula:
-        offset = último observado antes del pronóstico - primer pronóstico DWLT
+        offset = último observado disponible hasta la fecha de inicio del pronóstico
+                 - primer pronóstico DWLT
 
-    Luego:
-        nivel_*_ajustado_m = nivel_*_m + offset
-
-    También genera diagnóstico por estación.
+    Importante:
+        Se usa observado <= fecha_inicio_pronóstico.
+        Esto permite usar el observado del mismo día si ya existe.
     """
 
     pron = pron.copy()
@@ -202,7 +196,11 @@ def aplicar_ajuste_continuidad(
     for comid, g in pron.groupby("comid", dropna=False):
         g = g.sort_values("fecha").copy()
 
-        estacion = str(g["estacion"].iloc[0]) if "estacion" in g.columns and not g.empty else "SIN_NOMBRE"
+        estacion = (
+            str(g["estacion"].iloc[0])
+            if "estacion" in g.columns and not g.empty
+            else "SIN_NOMBRE"
+        )
 
         diag = {
             "estacion": estacion,
@@ -233,23 +231,30 @@ def aplicar_ajuste_continuidad(
             if not serie_bruta.empty:
                 diag["primer_nivel_bruto"] = float(serie_bruta.iloc[0])
 
+        # CAMBIO CLAVE:
+        # Antes era obs_diario["fecha"] < fecha_inicio
+        # Ahora es <= para usar observado del mismo día si ya existe.
         obs_est = obs_diario[
             (obs_diario["comid"] == comid)
-            & (obs_diario["fecha"] < fecha_inicio)
+            & (obs_diario["fecha"] <= fecha_inicio)
         ].copy()
 
         if obs_est.empty:
             for col in nivel_cols:
                 g[nombre_columna_ajustada(col)] = g[col]
 
-            g["advertencia_ajuste"] = "Sin observado previo al inicio del pronóstico"
+            g["advertencia_ajuste"] = "Sin observado disponible hasta el inicio del pronóstico"
 
             if "nivel_prom_ajustado_m" in g.columns:
-                serie_ajustada = pd.to_numeric(g["nivel_prom_ajustado_m"], errors="coerce").dropna()
+                serie_ajustada = pd.to_numeric(
+                    g["nivel_prom_ajustado_m"],
+                    errors="coerce",
+                ).dropna()
+
                 if not serie_ajustada.empty:
                     diag["primer_nivel_ajustado"] = float(serie_ajustada.iloc[0])
 
-            diag["advertencia_ajuste"] = "Sin observado previo al inicio del pronóstico"
+            diag["advertencia_ajuste"] = "Sin observado disponible hasta el inicio del pronóstico"
             diagnosticos.append(diag)
             partes.append(g)
             continue
@@ -277,7 +282,11 @@ def aplicar_ajuste_continuidad(
             )
 
             if "nivel_prom_ajustado_m" in g.columns:
-                serie_ajustada = pd.to_numeric(g["nivel_prom_ajustado_m"], errors="coerce").dropna()
+                serie_ajustada = pd.to_numeric(
+                    g["nivel_prom_ajustado_m"],
+                    errors="coerce",
+                ).dropna()
+
                 if not serie_ajustada.empty:
                     diag["primer_nivel_ajustado"] = float(serie_ajustada.iloc[0])
 
@@ -333,11 +342,19 @@ def aplicar_ajuste_continuidad(
         primer_ajustado = np.nan
 
         if "nivel_prom_ajustado_m" in g.columns:
-            serie_ajustada = pd.to_numeric(g["nivel_prom_ajustado_m"], errors="coerce").dropna()
+            serie_ajustada = pd.to_numeric(
+                g["nivel_prom_ajustado_m"],
+                errors="coerce",
+            ).dropna()
+
             if not serie_ajustada.empty:
                 primer_ajustado = float(serie_ajustada.iloc[0])
 
-        diferencia_control = primer_ajustado - nivel_obs if pd.notna(primer_ajustado) else np.nan
+        diferencia_control = (
+            primer_ajustado - nivel_obs
+            if pd.notna(primer_ajustado)
+            else np.nan
+        )
 
         diag["primer_nivel_bruto"] = nivel_pron_ini
         diag["offset_aplicado"] = offset
@@ -399,10 +416,6 @@ def main() -> None:
 
     df = df.dropna(subset=["fecha", "comid"]).copy()
 
-    # ========================================================
-    # FILTRAR SOLO LOS PRIMEROS 7 DÍAS DISPONIBLES
-    # ========================================================
-
     fechas_disponibles = sorted(df["fecha"].dropna().unique())
 
     if not fechas_disponibles:
@@ -414,14 +427,10 @@ def main() -> None:
 
     print(f"Fechas disponibles en forecast: {len(fechas_disponibles)}")
     print(f"Fechas exportadas: {len(fechas_exportar)}")
-    print(f"Inicio: {pd.to_datetime(fechas_exportar[0]).date()}")
-    print(f"Fin: {pd.to_datetime(fechas_exportar[-1]).date()}")
+    print(f"Inicio forecast exportado: {pd.to_datetime(fechas_exportar[0]).date()}")
+    print(f"Fin forecast exportado: {pd.to_datetime(fechas_exportar[-1]).date()}")
 
     df = df.sort_values(["estacion", "comid", "fecha"]).copy()
-
-    # ========================================================
-    # APLICAR AJUSTE DE CONTINUIDAD
-    # ========================================================
 
     obs_diario = preparar_observado(OBS_FILE)
 
@@ -429,10 +438,6 @@ def main() -> None:
         pron=df,
         obs_diario=obs_diario,
     )
-
-    # ========================================================
-    # TABLA DETALLADA DEL PRONÓSTICO
-    # ========================================================
 
     cols_base = [
         "estacion",
@@ -521,7 +526,7 @@ def main() -> None:
         "nivel_gfs_m",
         "nivel_wrf_m",
 
-        # Control del ajuste
+        # Control
         "ajuste_continuidad",
         "offset_ajuste_m",
         "fecha_obs_ajuste",
@@ -533,10 +538,6 @@ def main() -> None:
 
     cols_final = [c for c in cols_final if c in pron.columns]
     pron = pron[cols_final].copy()
-
-    # ========================================================
-    # RESUMEN POR ESTACIÓN
-    # ========================================================
 
     col_min = "nivel_min_ajustado_m" if "nivel_min_ajustado_m" in pron.columns else "nivel_min_m"
     col_prom = "nivel_prom_ajustado_m" if "nivel_prom_ajustado_m" in pron.columns else "nivel_prom_m"
@@ -586,10 +587,6 @@ def main() -> None:
         if col in resumen.columns:
             resumen[col] = pd.to_numeric(resumen[col], errors="coerce").round(3)
 
-    # ========================================================
-    # AGREGAR MÉTRICAS DWLT
-    # ========================================================
-
     if METRICAS.exists():
         print(f"Leyendo métricas DWLT: {METRICAS}")
 
@@ -634,10 +631,6 @@ def main() -> None:
         print("ADVERTENCIA: no existe metricas_dwlt_estaciones.xlsx. Se exportará sin métricas.")
         resumen["calidad_dwlt"] = "Sin evaluar"
 
-    # ========================================================
-    # PIVOT
-    # ========================================================
-
     pivot_prom = (
         pron.pivot_table(
             index=["estacion", "comid"],
@@ -647,10 +640,6 @@ def main() -> None:
         )
         .reset_index()
     )
-
-    # ========================================================
-    # ORDEN DE COLUMNAS DEL RESUMEN
-    # ========================================================
 
     cols_resumen = [
         "estacion",
@@ -685,10 +674,6 @@ def main() -> None:
     cols_resumen = [c for c in cols_resumen if c in resumen.columns]
     resumen = resumen[cols_resumen].copy()
 
-    # ========================================================
-    # EXPORTAR
-    # ========================================================
-
     pron.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
     diagnostico.to_csv(OUT_DIAG, index=False, encoding="utf-8-sig")
 
@@ -714,6 +699,7 @@ def main() -> None:
         "offset_aplicado",
         "primer_nivel_ajustado",
         "diferencia_control_m",
+        "dias_desde_obs",
         "ajuste_continuidad",
         "advertencia_ajuste",
     ]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import sqlite3
 from pathlib import Path
 
@@ -32,6 +31,17 @@ OUT_METRICAS_XLSX = OUTPUT_DIR / "metricas_dwlt_estaciones.xlsx"
 MIN_DATOS_MES_SIM = 30
 MIN_DATOS_MES_OBS = 30
 
+# Mínimo de días requeridos para procesar una estación.
+# Antes estaban hardcodeados como "365" dentro de main().
+MIN_DIAS_HIST = 365
+MIN_DIAS_OBS = 365
+
+# Margen relativo (fracción del rango observado histórico) permitido
+# al extrapolar niveles de forecast fuera del rango de la curva de
+# duración observada. Evita que una pendiente de extrapolación
+# calculada con solo 2 puntos extremos dispare niveles poco físicos.
+MARGEN_EXTRAPOLACION = 0.10
+
 # Similar al método GLOS/original:
 # para forecast usa el mes del inicio del pronóstico.
 FORECAST_USA_MES_INICIO = True
@@ -62,6 +72,31 @@ def get_nombre_estacion(row: pd.Series) -> str:
                 return value
 
     return "SIN_NOMBRE"
+
+
+def filtrar_con_log(
+    df: pd.DataFrame,
+    nombre: str,
+    subset_dropna: list[str],
+    col_positiva: str | None = None,
+) -> pd.DataFrame:
+    """
+    Aplica dropna (y opcionalmente filtro > 0) registrando cuántas filas
+    se eliminan en cada paso y por qué motivo, para poder auditar el
+    pipeline sin adivinar dónde se perdieron los datos.
+    """
+
+    n0 = len(df)
+    df = df.dropna(subset=subset_dropna).copy()
+    n1 = len(df)
+    print(f"  [{nombre}] eliminados por NaN en {subset_dropna}: {n0 - n1:,} de {n0:,}")
+
+    if col_positiva is not None:
+        df = df[df[col_positiva] > 0].copy()
+        n2 = len(df)
+        print(f"  [{nombre}] eliminados por {col_positiva}<=0: {n1 - n2:,} de {n1:,}")
+
+    return df
 
 
 # ============================================================
@@ -240,13 +275,6 @@ def limpiar_serie(values) -> np.ndarray:
     return arr
 
 
-def sturges_bins(n: int) -> int:
-    if n <= 1:
-        return 1
-
-    return max(2, int(math.ceil(1 + math.log2(n))))
-
-
 def construir_cdf_empirica(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Construye una CDF empírica mensual con valores históricos ordenados,
@@ -336,7 +364,12 @@ def interp_lineal_extrap(
         fuera del rango usa extremos.
 
     Si extrapolate=True:
-        extrapola linealmente en los extremos.
+        extrapola linealmente en los extremos usando la pendiente entre
+        los dos puntos más externos de la curva. NOTA: esta pendiente
+        puede ser inestable si esos puntos están muy próximos en
+        probabilidad (colas con valores repetidos). El llamador debe
+        acotar el resultado si necesita evitar valores poco físicos
+        (ver `limitar_a_rango_obs` en transformar_array_dwlt).
     """
 
     x = np.asarray(x, dtype=float)
@@ -431,9 +464,17 @@ def transformar_array_dwlt(
     meses,
     curvas: dict[int, dict],
     extrapolate: bool = False,
+    limitar_a_rango_obs: bool = True,
+    margen_relativo: float = MARGEN_EXTRAPOLACION,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Transforma arrays completos de caudal a nivel usando curvas ya precalculadas.
+
+    Si `limitar_a_rango_obs=True`, el nivel resultante se acota al rango
+    [obs_min - margen, obs_max + margen] de la curva de duración observada
+    del mes correspondiente. Esto evita que la extrapolación lineal con
+    solo 2 puntos extremos (ver interp_lineal_extrap) produzca niveles
+    poco físicos para eventos extremos del forecast.
     """
 
     caudales = np.asarray(caudales, dtype=float)
@@ -475,6 +516,16 @@ def transformar_array_dwlt(
             extrapolate=extrapolate,
         )
 
+        if limitar_a_rango_obs:
+            obs_min = curva["obs_x"].min()
+            obs_max = curva["obs_x"].max()
+            rango = obs_max - obs_min
+            h = np.clip(
+                h,
+                obs_min - margen_relativo * rango,
+                obs_max + margen_relativo * rango,
+            )
+
         probs[mask] = p
         niveles[mask] = h
 
@@ -488,6 +539,11 @@ def transformar_historico_estacion(
     obs_est: pd.DataFrame,
     curvas: dict[int, dict],
 ) -> pd.DataFrame:
+    assert hist_sim_est["comid"].eq(comid).all(), (
+        f"COMID inconsistente en hist_sim_est para estación {estacion}: "
+        f"se esperaba {comid}."
+    )
+
     out = hist_sim_est[["fecha", "comid", "mes", "qr_hist"]].copy()
     out["estacion"] = estacion
     out["mes_dwlt"] = out["mes"].astype(int)
@@ -517,17 +573,37 @@ def transformar_pronostico_estacion(
     fore_est: pd.DataFrame,
     curvas: dict[int, dict],
 ) -> pd.DataFrame:
+    if not fore_est.empty:
+        assert fore_est["comid"].eq(comid).all(), (
+            f"COMID inconsistente en fore_est para estación {estacion}: "
+            f"se esperaba {comid}."
+        )
+
     out = fore_est.copy()
     out["estacion"] = estacion
 
     if out.empty:
+        out["forecast_mes_inicio_valido"] = pd.Series(dtype=bool)
         return out
 
     if FORECAST_USA_MES_INICIO:
         mes_inicio = int(pd.to_datetime(out["fecha"].min()).month)
         out["mes_dwlt"] = mes_inicio
+
+        curva_inicio = curvas.get(mes_inicio, {"ok": False})
+        mes_inicio_valido = bool(curva_inicio.get("ok", False))
+        out["forecast_mes_inicio_valido"] = mes_inicio_valido
+
+        if not mes_inicio_valido:
+            print(
+                f"  ADVERTENCIA: el mes de inicio del forecast ({mes_inicio}) "
+                f"no tiene curva DWLT válida para {estacion} (COMID {comid}). "
+                f"Todo el pronóstico de esta estación quedará en NaN, aunque "
+                f"otros meses del año sí puedan tener curva válida."
+            )
     else:
         out["mes_dwlt"] = out["mes"].astype(int)
+        out["forecast_mes_inicio_valido"] = np.nan
 
     columnas_fore = ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]
 
@@ -603,6 +679,12 @@ def calcular_metricas_estacion(
 
     meses_ok = [m for m, c in curvas.items() if c.get("ok", False)]
 
+    forecast_mes_inicio_valido = np.nan
+    if len(fore_dwlt_est) and "forecast_mes_inicio_valido" in fore_dwlt_est.columns:
+        valores = fore_dwlt_est["forecast_mes_inicio_valido"].dropna().unique()
+        if len(valores) == 1:
+            forecast_mes_inicio_valido = bool(valores[0])
+
     out = {
         "estacion": estacion,
         "comid": comid,
@@ -613,6 +695,7 @@ def calcular_metricas_estacion(
         "n_validacion": int(len(valid)),
         "meses_curva_ok": ",".join([str(m) for m in meses_ok]),
         "n_meses_curva_ok": int(len(meses_ok)),
+        "forecast_mes_inicio_valido": forecast_mes_inicio_valido,
         "fecha_inicio_validacion": valid["fecha"].min() if len(valid) else pd.NaT,
         "fecha_fin_validacion": valid["fecha"].max() if len(valid) else pd.NaT,
         "nivel_obs_min": valid["nivel_observado_m"].min() if len(valid) else np.nan,
@@ -691,16 +774,20 @@ def main():
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
 
     # --------------------------------------------------------
-    # Limpieza de negativos, ceros y nulos
+    # Limpieza de negativos, ceros y nulos (con trazabilidad)
     # --------------------------------------------------------
 
-    hist = hist.dropna(subset=["fecha", "comid", "qr_hist", "mes"]).copy()
-    hist = hist[hist["qr_hist"] > 0].copy()
+    print("\nFiltrando registros inválidos...")
 
-    obs = obs.dropna(subset=["fecha", "comid", "nivel_m", "mes"]).copy()
-    obs = obs[obs["nivel_m"] > 0].copy()
-
-    fore = fore.dropna(subset=["fecha", "comid", "mes"]).copy()
+    hist = filtrar_con_log(
+        hist, "hist", ["fecha", "comid", "qr_hist", "mes"], "qr_hist"
+    )
+    obs = filtrar_con_log(
+        obs, "obs", ["fecha", "comid", "nivel_m", "mes"], "nivel_m"
+    )
+    fore = filtrar_con_log(
+        fore, "fore", ["fecha", "comid", "mes"]
+    )
 
     for col in ["qr_eta_eqm", "qr_eta_scal", "qr_gfs", "qr_wrf"]:
         if col in fore.columns:
@@ -710,7 +797,7 @@ def main():
     estaciones_validas = estaciones.dropna(subset=["comid"]).copy()
     estaciones_validas["comid"] = estaciones_validas["comid"].astype("int64")
 
-    print(f"Estaciones válidas desde GPKG: {len(estaciones_validas)}")
+    print(f"\nEstaciones válidas desde GPKG: {len(estaciones_validas)}")
     print(f"Histórico SONICS: {len(hist):,} registros")
     print(f"Pronóstico SONICS: {len(fore):,} registros")
     print(f"Observado nivel: {len(obs):,} registros")
@@ -719,6 +806,7 @@ def main():
     lista_hist_dwlt = []
     lista_fore_dwlt = []
     lista_metricas = []
+    lista_estaciones_saltadas = []
 
     total_est = len(estaciones_validas)
 
@@ -739,16 +827,25 @@ def main():
             f"Pronóstico: {len(fore_est):,}"
         )
 
-        if len(hist_est) < 365:
-            print("  Saltando: histórico SONICS insuficiente.")
+        if len(hist_est) < MIN_DIAS_HIST:
+            print(f"  Saltando: histórico SONICS insuficiente (< {MIN_DIAS_HIST} días).")
+            lista_estaciones_saltadas.append(
+                {"estacion": estacion, "comid": comid, "motivo": "historico_insuficiente"}
+            )
             continue
 
-        if len(obs_est) < 365:
-            print("  Saltando: observado insuficiente.")
+        if len(obs_est) < MIN_DIAS_OBS:
+            print(f"  Saltando: observado insuficiente (< {MIN_DIAS_OBS} días).")
+            lista_estaciones_saltadas.append(
+                {"estacion": estacion, "comid": comid, "motivo": "observado_insuficiente"}
+            )
             continue
 
         if len(fore_est) == 0:
             print("  Saltando: sin pronóstico.")
+            lista_estaciones_saltadas.append(
+                {"estacion": estacion, "comid": comid, "motivo": "sin_pronostico"}
+            )
             continue
 
         print("  Construyendo curvas mensuales...")
@@ -762,6 +859,9 @@ def main():
 
         if not meses_ok:
             print("  Saltando: sin curvas mensuales válidas.")
+            lista_estaciones_saltadas.append(
+                {"estacion": estacion, "comid": comid, "motivo": "sin_curvas_validas"}
+            )
             continue
 
         print("  Transformando histórico...")
@@ -811,6 +911,7 @@ def main():
     hist_dwlt = pd.concat(lista_hist_dwlt, ignore_index=True)
     fore_dwlt = pd.concat(lista_fore_dwlt, ignore_index=True)
     metricas = pd.DataFrame(lista_metricas)
+    estaciones_saltadas = pd.DataFrame(lista_estaciones_saltadas)
 
     print("\nGuardando resultados...")
 
@@ -836,10 +937,17 @@ def main():
 
         resumen_fore.to_excel(writer, sheet_name="resumen_forecast_nivel", index=False)
 
+        if not estaciones_saltadas.empty:
+            estaciones_saltadas.to_excel(writer, sheet_name="estaciones_saltadas", index=False)
+
     print(f"Histórico transformado: {OUT_HIST}")
     print(f"Pronóstico transformado: {OUT_FORE}")
     print(f"Métricas Parquet: {OUT_METRICAS_PARQUET}")
     print(f"Métricas Excel: {OUT_METRICAS_XLSX}")
+
+    if not estaciones_saltadas.empty:
+        print(f"\nEstaciones saltadas: {len(estaciones_saltadas)} (ver hoja 'estaciones_saltadas' en el Excel)")
+        print(estaciones_saltadas["motivo"].value_counts().to_string())
 
     print("\nResumen de métricas:")
 
@@ -849,6 +957,7 @@ def main():
         "metodo_dwlt",
         "n_validacion",
         "n_meses_curva_ok",
+        "forecast_mes_inicio_valido",
         "r_pearson",
         "nse",
         "kge_2009",

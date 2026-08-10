@@ -617,52 +617,6 @@ def crear_mapa_estaciones(
                 fill_opacity=0.85,
             ).add_to(mapa)
 
-    # --------------------------------------------------------
-    # Leyenda dentro del mapa - esquina inferior izquierda
-    # --------------------------------------------------------
-
-    legend_html = """
-    <div style="
-        position: fixed;
-        bottom: 30px;
-        left: 30px;
-        z-index: 9999;
-        background-color: white;
-        padding: 10px 12px;
-        border: 2px solid #cbd5e1;
-        border-radius: 8px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-        font-size: 13px;
-        color: #0f172a;
-        line-height: 1.5;
-    ">
-        <b>Leyenda</b><br>
-        <span style="
-            display:inline-block;
-            width:12px;
-            height:12px;
-            background:red;
-            border-radius:50%;
-            border:2px solid red;
-            margin-right:6px;
-        "></span>
-        Estación seleccionada<br>
-
-        <span style="
-            display:inline-block;
-            width:12px;
-            height:12px;
-            background:blue;
-            border-radius:50%;
-            border:2px solid blue;
-            margin-right:6px;
-        "></span>
-        Otras estaciones
-    </div>
-    """
-
-    mapa.get_root().html.add_child(folium.Element(legend_html))
-
     return mapa
 
 

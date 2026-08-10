@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 import folium
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -34,8 +35,6 @@ DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
-# Observado para gráfico.
-# Solo se grafica observado si el último dato está cerca del inicio del pronóstico.
 DIAS_OBS_GRAFICO = 5
 MAX_DIAS_OBS_GRAFICO = 7
 
@@ -153,20 +152,18 @@ def convertir_fechas(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    if "fecha" in df.columns:
-        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-    elif "fecha_texto" in df.columns:
+    for col in [
+        "fecha",
+        "fecha_obs_ajuste",
+        "fecha_emision_pronostico",
+        "fecha_ejecucion_workflow",
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    if "fecha" not in df.columns and "fecha_texto" in df.columns:
         df["fecha"] = pd.to_datetime(
             df["fecha_texto"],
-            format="%d/%m/%Y",
-            errors="coerce",
-        )
-
-    if "fecha_obs_ajuste" in df.columns:
-        df["fecha_obs_ajuste"] = pd.to_datetime(df["fecha_obs_ajuste"], errors="coerce")
-    elif "fecha_obs_ajuste_texto" in df.columns:
-        df["fecha_obs_ajuste"] = pd.to_datetime(
-            df["fecha_obs_ajuste_texto"],
             format="%d/%m/%Y",
             errors="coerce",
         )
@@ -312,11 +309,73 @@ def cargar_parquet_sin_cache(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def cargar_historico_pronosticos() -> pd.DataFrame:
+    archivos_parquet = sorted(OUTPUT_DIR.glob("historico_pronosticos_AH_*.parquet"))
+
+    partes = []
+
+    for path in archivos_parquet:
+        try:
+            tmp = pd.read_parquet(path)
+            tmp = normalizar_columnas(tmp)
+            tmp = convertir_fechas(tmp)
+            tmp = convertir_comid(tmp)
+            tmp = convertir_numericos(tmp)
+            partes.append(tmp)
+        except Exception as e:
+            st.warning(f"No se pudo leer histórico {path.name}: {e}")
+
+    if partes:
+        hist = pd.concat(partes, ignore_index=True)
+        hist = hist.drop_duplicates(
+            subset=[
+                "anio_hidrologico",
+                "fecha_emision_pronostico",
+                "estacion",
+                "comid",
+                "fecha",
+            ],
+            keep="last",
+        )
+        return hist
+
+    archivos_csv = sorted(OUTPUT_DIR.glob("historico_pronosticos_AH_*.csv"))
+
+    partes_csv = []
+
+    for path in archivos_csv:
+        try:
+            tmp = pd.read_csv(path)
+            tmp = normalizar_columnas(tmp)
+            tmp = convertir_fechas(tmp)
+            tmp = convertir_comid(tmp)
+            tmp = convertir_numericos(tmp)
+            partes_csv.append(tmp)
+        except Exception as e:
+            st.warning(f"No se pudo leer histórico {path.name}: {e}")
+
+    if partes_csv:
+        hist = pd.concat(partes_csv, ignore_index=True)
+        hist = hist.drop_duplicates(
+            subset=[
+                "anio_hidrologico",
+                "fecha_emision_pronostico",
+                "estacion",
+                "comid",
+                "fecha",
+            ],
+            keep="last",
+        )
+        return hist
+
+    return pd.DataFrame()
+
+
 # ============================================================
 # VALIDACIONES Y PROCESOS
 # ============================================================
 
-def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
+def validar_columnas_pronostico(pron: pd.DataFrame) -> None:
     requeridas = [
         "nivel_prom_ajustado_m",
         "nivel_min_ajustado_m",
@@ -340,6 +399,29 @@ def validar_columnas_ajustadas(pron: pd.DataFrame) -> None:
         st.write("Columnas disponibles:")
         st.write(list(pron.columns))
         st.stop()
+
+
+def validar_columnas_historico(hist: pd.DataFrame) -> bool:
+    if hist.empty:
+        return False
+
+    requeridas = [
+        "fecha_emision_pronostico",
+        "anio_hidrologico",
+        "estacion",
+        "comid",
+        "fecha",
+        "nivel_prom_m",
+        "nivel_prom_ajustado_m",
+    ]
+
+    faltantes = [c for c in requeridas if c not in hist.columns]
+
+    if faltantes:
+        st.warning(f"El histórico existe, pero le faltan columnas: {faltantes}")
+        return False
+
+    return True
 
 
 def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
@@ -370,38 +452,36 @@ def preparar_resumen_pronostico(pron: pd.DataFrame) -> pd.DataFrame:
     return resumen
 
 
-def obtener_observado_reciente_para_grafico(
-    obs_est: pd.DataFrame,
-    fecha_inicio_pronostico,
-    dias_obs: int = DIAS_OBS_GRAFICO,
-    max_dias_antiguedad: int = MAX_DIAS_OBS_GRAFICO,
-) -> tuple[pd.DataFrame, bool, str]:
-    """
-    Devuelve observado reciente para graficar.
-
-    Reglas:
-    - Solo usa observado antes del inicio del pronóstico.
-    - Si el último observado antes del pronóstico está muy antiguo, no grafica observado.
-    - Si hay menos de 5 días disponibles dentro de la ventana, grafica solo lo disponible.
-    """
-
+def observado_diario(obs_est: pd.DataFrame) -> pd.DataFrame:
     if obs_est.empty or "fecha" not in obs_est.columns or "nivel_m" not in obs_est.columns:
-        return pd.DataFrame(), False, "Sin datos observados"
-
-    if fecha_inicio_pronostico is None or pd.isna(fecha_inicio_pronostico):
-        return pd.DataFrame(), False, "Sin fecha de inicio de pronóstico"
+        return pd.DataFrame()
 
     obs_est = obs_est.dropna(subset=["fecha", "nivel_m"]).copy()
     obs_est = obs_est.sort_values("fecha")
 
-    obs_diario = (
+    return (
         obs_est.groupby("fecha", dropna=False)
         .agg(nivel_m=("nivel_m", "mean"))
         .reset_index()
         .sort_values("fecha")
     )
 
-    obs_prev = obs_diario[obs_diario["fecha"] < fecha_inicio_pronostico].copy()
+
+def obtener_observado_reciente_para_grafico(
+    obs_est: pd.DataFrame,
+    fecha_inicio_pronostico,
+    dias_obs: int = DIAS_OBS_GRAFICO,
+    max_dias_antiguedad: int = MAX_DIAS_OBS_GRAFICO,
+) -> tuple[pd.DataFrame, bool, str]:
+    if obs_est.empty or "fecha" not in obs_est.columns or "nivel_m" not in obs_est.columns:
+        return pd.DataFrame(), False, "Sin datos observados"
+
+    if fecha_inicio_pronostico is None or pd.isna(fecha_inicio_pronostico):
+        return pd.DataFrame(), False, "Sin fecha de inicio de pronóstico"
+
+    obs_d = observado_diario(obs_est)
+
+    obs_prev = obs_d[obs_d["fecha"] <= fecha_inicio_pronostico].copy()
 
     if obs_prev.empty:
         return pd.DataFrame(), False, "Sin observado previo al pronóstico"
@@ -417,7 +497,7 @@ def obtener_observado_reciente_para_grafico(
 
     obs_plot = obs_prev[
         (obs_prev["fecha"] >= fecha_min)
-        & (obs_prev["fecha"] < fecha_inicio_pronostico)
+        & (obs_prev["fecha"] <= fecha_inicio_pronostico)
     ].copy()
 
     if obs_plot.empty:
@@ -426,6 +506,35 @@ def obtener_observado_reciente_para_grafico(
     msg = f"Observado graficado: {len(obs_plot)} dato(s), último hace {dias_desde_obs} día(s)"
 
     return obs_plot, True, msg
+
+
+def calcular_metricas_validacion(df_comp: pd.DataFrame) -> dict:
+    if df_comp.empty:
+        return {
+            "n": 0,
+            "mae": np.nan,
+            "rmse": np.nan,
+            "bias": np.nan,
+        }
+
+    tmp = df_comp.dropna(subset=["nivel_m", "nivel_prom_ajustado_m"]).copy()
+
+    if tmp.empty:
+        return {
+            "n": 0,
+            "mae": np.nan,
+            "rmse": np.nan,
+            "bias": np.nan,
+        }
+
+    error = tmp["nivel_prom_ajustado_m"] - tmp["nivel_m"]
+
+    return {
+        "n": len(tmp),
+        "mae": float(np.mean(np.abs(error))),
+        "rmse": float(np.sqrt(np.mean(error ** 2))),
+        "bias": float(np.mean(error)),
+    }
 
 
 # ============================================================
@@ -511,6 +620,323 @@ def crear_mapa_estaciones(
 
 
 # ============================================================
+# GRÁFICOS
+# ============================================================
+
+def graficar_pronostico_actual(
+    pron_est: pd.DataFrame,
+    obs_est: pd.DataFrame,
+) -> None:
+    fecha_inicio_pron = None
+
+    if not pron_est.empty and "fecha" in pron_est.columns:
+        fecha_inicio_pron = pron_est["fecha"].min()
+
+    obs_plot, mostrar_obs, mensaje_obs = obtener_observado_reciente_para_grafico(
+        obs_est=obs_est,
+        fecha_inicio_pronostico=fecha_inicio_pron,
+    )
+
+    pron_plot = pron_est.copy()
+
+    if mostrar_obs and not obs_plot.empty:
+        fecha_ult_obs = obs_plot["fecha"].max()
+        pron_plot = pron_plot[pron_plot["fecha"] > fecha_ult_obs].copy()
+
+    if mostrar_obs and not obs_plot.empty:
+        st.caption(
+            f"Última observación graficada: {pd.to_datetime(obs_plot['fecha'].iloc[-1]).strftime('%d/%m/%Y')} | {mensaje_obs}"
+        )
+    else:
+        st.caption(mensaje_obs)
+
+    st.markdown(
+        '<div class="section-title">Nivel observado actual + pronóstico original y ajustado de 7 días</div>',
+        unsafe_allow_html=True,
+    )
+
+    fig = go.Figure()
+
+    if mostrar_obs and not obs_plot.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=obs_plot["fecha"],
+                y=obs_plot["nivel_m"],
+                mode="lines+markers",
+                name="Observado reciente",
+                line=dict(width=3, color="black"),
+                marker=dict(size=8, color="black"),
+            )
+        )
+
+    if not pron_plot.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_plot["fecha"],
+                y=pron_plot["nivel_prom_m"],
+                mode="lines+markers",
+                name="Pronóstico original",
+                line=dict(width=2, dash="dash", color="gray"),
+                marker=dict(size=6, color="gray"),
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=pron_plot["fecha"],
+                y=pron_plot["nivel_prom_ajustado_m"],
+                mode="lines+markers",
+                name="Pronóstico ajustado",
+                line=dict(width=3, color="blue"),
+                marker=dict(size=8, color="blue"),
+            )
+        )
+
+        if "nivel_max_ajustado_m" in pron_plot.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=pron_plot["fecha"],
+                    y=pron_plot["nivel_max_ajustado_m"],
+                    mode="lines",
+                    name="Máximo ajustado",
+                    line=dict(width=1, dash="dot"),
+                    visible="legendonly",
+                )
+            )
+
+        if "nivel_min_ajustado_m" in pron_plot.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=pron_plot["fecha"],
+                    y=pron_plot["nivel_min_ajustado_m"],
+                    mode="lines",
+                    name="Mínimo ajustado",
+                    line=dict(width=1, dash="dot"),
+                    visible="legendonly",
+                )
+            )
+
+    fecha_referencia = None
+    texto_referencia = "Último observado"
+
+    if mostrar_obs and not obs_plot.empty:
+        fecha_referencia = pd.to_datetime(obs_plot["fecha"].iloc[-1])
+    elif fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
+        fecha_referencia = pd.to_datetime(fecha_inicio_pron)
+        texto_referencia = "Inicio pronóstico"
+
+    if fecha_referencia is not None and pd.notna(fecha_referencia):
+        fig.add_shape(
+            type="line",
+            x0=fecha_referencia,
+            x1=fecha_referencia,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line=dict(color="gray", width=2, dash="dash"),
+        )
+
+        fig.add_annotation(
+            x=fecha_referencia,
+            y=1,
+            xref="x",
+            yref="paper",
+            text=texto_referencia,
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(size=11, color="gray"),
+        )
+
+    fig.update_layout(
+        height=430,
+        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis_title="Fecha",
+        yaxis_title="Nivel (m)",
+        legend_title="Serie",
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def graficar_validacion_historica(
+    hist_est: pd.DataFrame,
+    obs_est: pd.DataFrame,
+) -> None:
+    if hist_est.empty:
+        st.info("No hay histórico de pronósticos para esta estación.")
+        return
+
+    fechas_disp = (
+        hist_est["fecha_emision_pronostico"]
+        .dropna()
+        .dt.normalize()
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+
+    if not fechas_disp:
+        st.info("No hay fechas de emisión disponibles para esta estación.")
+        return
+
+    fechas_disp_date = [f.date() for f in fechas_disp]
+
+    fecha_sel = st.selectbox(
+        "Fecha de emisión del pronóstico histórico",
+        fechas_disp_date,
+        index=len(fechas_disp_date) - 1,
+    )
+
+    fecha_sel_ts = pd.to_datetime(fecha_sel)
+
+    pron_hist = hist_est[
+        hist_est["fecha_emision_pronostico"].dt.normalize() == fecha_sel_ts
+    ].copy()
+
+    pron_hist = pron_hist.sort_values("fecha").copy()
+
+    if pron_hist.empty:
+        st.warning("No hay pronóstico histórico para la fecha seleccionada.")
+        return
+
+    fecha_ini = fecha_sel_ts - pd.Timedelta(days=5)
+    fecha_fin = pron_hist["fecha"].max()
+
+    obs_d = observado_diario(obs_est)
+
+    obs_plot = obs_d[
+        (obs_d["fecha"] >= fecha_ini)
+        & (obs_d["fecha"] <= fecha_fin)
+    ].copy()
+
+    obs_val = obs_d[
+        (obs_d["fecha"] >= pron_hist["fecha"].min())
+        & (obs_d["fecha"] <= fecha_fin)
+    ].copy()
+
+    comp = pron_hist.merge(
+        obs_val,
+        on="fecha",
+        how="left",
+    )
+
+    metricas = calcular_metricas_validacion(comp)
+
+    k1, k2, k3, k4 = st.columns(4)
+
+    k1.metric("Días comparados", str(metricas["n"]))
+    k2.metric("MAE ajustado", f"{formato_num(metricas['mae'], 3)} m")
+    k3.metric("RMSE ajustado", f"{formato_num(metricas['rmse'], 3)} m")
+    k4.metric("BIAS ajustado", f"{formato_num(metricas['bias'], 3)} m")
+
+    st.markdown(
+        '<div class="section-title">Validación histórica: observado real vs pronóstico emitido</div>',
+        unsafe_allow_html=True,
+    )
+
+    fig = go.Figure()
+
+    if not obs_plot.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=obs_plot["fecha"],
+                y=obs_plot["nivel_m"],
+                mode="lines+markers",
+                name="Observado real",
+                line=dict(width=3, color="black"),
+                marker=dict(size=8, color="black"),
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=pron_hist["fecha"],
+            y=pron_hist["nivel_prom_m"],
+            mode="lines+markers",
+            name="Pronóstico original emitido",
+            line=dict(width=2, dash="dash", color="gray"),
+            marker=dict(size=6, color="gray"),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=pron_hist["fecha"],
+            y=pron_hist["nivel_prom_ajustado_m"],
+            mode="lines+markers",
+            name="Pronóstico ajustado emitido",
+            line=dict(width=3, color="blue"),
+            marker=dict(size=8, color="blue"),
+        )
+    )
+
+    if "nivel_max_ajustado_m" in pron_hist.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_hist["fecha"],
+                y=pron_hist["nivel_max_ajustado_m"],
+                mode="lines",
+                name="Máximo ajustado emitido",
+                line=dict(width=1, dash="dot"),
+                visible="legendonly",
+            )
+        )
+
+    if "nivel_min_ajustado_m" in pron_hist.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_hist["fecha"],
+                y=pron_hist["nivel_min_ajustado_m"],
+                mode="lines",
+                name="Mínimo ajustado emitido",
+                line=dict(width=1, dash="dot"),
+                visible="legendonly",
+            )
+        )
+
+    fig.add_shape(
+        type="line",
+        x0=fecha_sel_ts,
+        x1=fecha_sel_ts,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref="paper",
+        line=dict(color="gray", width=2, dash="dash"),
+    )
+
+    fig.add_annotation(
+        x=fecha_sel_ts,
+        y=1,
+        xref="x",
+        yref="paper",
+        text="Fecha emisión",
+        showarrow=False,
+        yanchor="bottom",
+        font=dict(size=11, color="gray"),
+    )
+
+    fig.update_layout(
+        height=460,
+        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis_title="Fecha",
+        yaxis_title="Nivel (m)",
+        legend_title="Serie",
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "La línea negra muestra el nivel observado real. "
+        "La línea gris punteada muestra el pronóstico original emitido en la fecha seleccionada. "
+        "La línea azul muestra el pronóstico ajustado emitido en esa fecha."
+    )
+
+
+# ============================================================
 # CARGA PRINCIPAL
 # ============================================================
 
@@ -519,6 +945,7 @@ pron = cargar_csv_sin_cache(PRONOSTICO_CSV)
 diagnostico = cargar_csv_sin_cache(DIAGNOSTICO_CSV)
 metricas = cargar_parquet_sin_cache(METRICAS_PARQUET)
 obs = cargar_parquet_sin_cache(OBS_PARQUET)
+historico = cargar_historico_pronosticos()
 
 if "nivel_m" in obs.columns:
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
@@ -563,7 +990,9 @@ if faltantes:
         st.write(f"- `{f}`")
     st.stop()
 
-validar_columnas_ajustadas(pron)
+validar_columnas_pronostico(pron)
+
+historico_ok = validar_columnas_historico(historico)
 
 pron_resumen = preparar_resumen_pronostico(pron)
 
@@ -609,6 +1038,14 @@ if st.session_state.estacion_sel not in estaciones_disponibles:
 with st.sidebar:
     st.header("Filtros")
 
+    modo = st.radio(
+        "Modo de visualización",
+        [
+            "Pronóstico actual",
+            "Validación histórica",
+        ],
+    )
+
     index_actual = estaciones_disponibles.index(st.session_state.estacion_sel)
 
     estacion_sidebar = st.selectbox(
@@ -625,14 +1062,18 @@ with st.sidebar:
 
     checks = {
         "GPKG estaciones": not estaciones.empty,
-        "pronóstico ajustado CSV": not pron.empty,
+        "pronóstico actual CSV": not pron.empty,
         "diagnóstico ajuste CSV": not diagnostico.empty,
         "métricas Parquet": not metricas.empty,
         "observado Parquet": not obs.empty,
+        "histórico pronósticos AH": historico_ok,
     }
 
     for nombre, ok in checks.items():
         st.write(("✅ " if ok else "❌ ") + nombre)
+
+    if modo == "Validación histórica" and not historico_ok:
+        st.warning("Aún no existe histórico. Ejecuta primero el workflow con el script 04 actualizado.")
 
     st.caption("Puedes seleccionar estaciones desde el selector o haciendo click en el mapa.")
 
@@ -658,6 +1099,7 @@ elif not pron_est.empty and "comid" in pron_est.columns:
 metricas_est = pd.DataFrame()
 obs_est = pd.DataFrame()
 estacion_map_est = pd.DataFrame()
+hist_est = pd.DataFrame()
 
 if comid_sel is not None:
     metricas_est = (
@@ -678,15 +1120,11 @@ if comid_sel is not None:
         else pd.DataFrame()
     )
 
-fecha_inicio_pron = None
-
-if not pron_est.empty and "fecha" in pron_est.columns:
-    fecha_inicio_pron = pron_est["fecha"].min()
-
-obs_plot, mostrar_obs, mensaje_obs = obtener_observado_reciente_para_grafico(
-    obs_est=obs_est,
-    fecha_inicio_pronostico=fecha_inicio_pron,
-)
+    hist_est = (
+        historico[pd.to_numeric(historico["comid"], errors="coerce") == float(comid_sel)].copy()
+        if historico_ok and "comid" in historico.columns
+        else pd.DataFrame()
+    )
 
 
 # ============================================================
@@ -770,208 +1208,74 @@ with col_panel:
         unsafe_allow_html=True,
     )
 
-    nivel_obs_reciente = None
-    fecha_obs_reciente = None
+    if modo == "Pronóstico actual":
+        nivel_obs_reciente = None
 
-    if mostrar_obs and not obs_plot.empty:
-        nivel_obs_reciente = obs_plot["nivel_m"].iloc[-1]
-        fecha_obs_reciente = obs_plot["fecha"].iloc[-1]
+        obs_d = observado_diario(obs_est)
+        if not obs_d.empty:
+            nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
 
-    nivel_inicio = None
-    nivel_fin = None
-    tendencia_val = None
+        nivel_inicio = None
+        nivel_fin = None
+        tendencia_val = None
 
-    if not pron_est.empty:
-        serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
+        if not pron_est.empty:
+            serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
 
-        if not serie_prom.empty:
-            nivel_inicio = serie_prom.iloc[0]
-            nivel_fin = serie_prom.iloc[-1]
-            tendencia_val = nivel_fin - nivel_inicio
+            if not serie_prom.empty:
+                nivel_inicio = serie_prom.iloc[0]
+                nivel_fin = serie_prom.iloc[-1]
+                tendencia_val = nivel_fin - nivel_inicio
 
-    kge = None
-    rmse = None
+        kge = None
+        rmse = None
 
-    if not metricas_est.empty:
-        if "kge_2009" in metricas_est.columns:
-            kge = metricas_est["kge_2009"].iloc[0]
+        if not metricas_est.empty:
+            if "kge_2009" in metricas_est.columns:
+                kge = metricas_est["kge_2009"].iloc[0]
 
-        if "rmse_m" in metricas_est.columns:
-            rmse = metricas_est["rmse_m"].iloc[0]
+            if "rmse_m" in metricas_est.columns:
+                rmse = metricas_est["rmse_m"].iloc[0]
 
-    k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4 = st.columns(4)
 
-    k1.metric(
-        "Nivel observado reciente",
-        f"{formato_num(nivel_obs_reciente)} m",
-    )
-
-    k2.metric(
-        "Nivel pronosticado ajustado",
-        f"{formato_num(nivel_fin)} m",
-    )
-
-    k3.metric(
-        "Tendencia esperada",
-        clasificar_tendencia(tendencia_val),
-        delta=f"{formato_num(tendencia_val)} m" if tendencia_val is not None else None,
-    )
-
-    k4.metric(
-        "Calidad DWLT / KGE",
-        clasificar_calidad(kge),
-        delta=f"KGE {formato_num(kge, 3)} | RMSE {formato_num(rmse, 3)} m",
-    )
-
-    if fecha_obs_reciente is not None:
-        st.caption(
-            f"Última observación graficada: {pd.to_datetime(fecha_obs_reciente).strftime('%d/%m/%Y')} | {mensaje_obs}"
+        k1.metric(
+            "Nivel observado reciente",
+            f"{formato_num(nivel_obs_reciente)} m",
         )
+
+        k2.metric(
+            "Nivel pronosticado ajustado",
+            f"{formato_num(nivel_fin)} m",
+        )
+
+        k3.metric(
+            "Tendencia esperada",
+            clasificar_tendencia(tendencia_val),
+            delta=f"{formato_num(tendencia_val)} m" if tendencia_val is not None else None,
+        )
+
+        k4.metric(
+            "Calidad DWLT / KGE",
+            clasificar_calidad(kge),
+            delta=f"KGE {formato_num(kge, 3)} | RMSE {formato_num(rmse, 3)} m",
+        )
+
+        graficar_pronostico_actual(
+            pron_est=pron_est,
+            obs_est=obs_est,
+        )
+
     else:
-        st.caption(mensaje_obs)
+        st.info(
+            "Modo de validación histórica: selecciona una fecha de emisión para comparar "
+            "el pronóstico guardado contra el nivel observado real."
+        )
 
-    st.markdown(
-        '<div class="section-title">Observado reciente + pronóstico original y ajustado de 7 días</div>',
-        unsafe_allow_html=True,
-    )
-
-    fig = go.Figure()
-
-    # --------------------------------------------------------
-    # Observado reciente
-    # --------------------------------------------------------
-
-    if mostrar_obs and not obs_plot.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=obs_plot["fecha"],
-                y=obs_plot["nivel_m"],
-                mode="lines+markers",
-                name="Observado reciente",
-                line=dict(width=3, color="black"),
-                marker=dict(size=8),
+        if not historico_ok:
+            st.warning("Todavía no existe archivo histórico. Ejecuta el workflow actualizado.")
+        else:
+            graficar_validacion_historica(
+                hist_est=hist_est,
+                obs_est=obs_est,
             )
-        )
-
-    # --------------------------------------------------------
-    # Conexión observado-pronóstico ajustado
-    # Solo si el observado es reciente.
-    # --------------------------------------------------------
-
-    if mostrar_obs and not obs_plot.empty and not pron_est.empty:
-        ultimo_obs_fecha = obs_plot["fecha"].iloc[-1]
-        ultimo_obs_nivel = obs_plot["nivel_m"].iloc[-1]
-
-        primer_pron_fecha = pron_est["fecha"].iloc[0]
-        primer_pron_nivel = pron_est["nivel_prom_ajustado_m"].iloc[0]
-
-        fig.add_trace(
-            go.Scatter(
-                x=[ultimo_obs_fecha, primer_pron_fecha],
-                y=[ultimo_obs_nivel, primer_pron_nivel],
-                mode="lines",
-                name="Conexión observado-pronóstico",
-                line=dict(width=3, color="black"),
-                showlegend=False,
-                hoverinfo="skip",
-            )
-        )
-
-    # --------------------------------------------------------
-    # Pronóstico original
-    # --------------------------------------------------------
-
-    if not pron_est.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=pron_est["fecha"],
-                y=pron_est["nivel_prom_m"],
-                mode="lines+markers",
-                name="Pronóstico original",
-                line=dict(width=2, dash="dash"),
-                marker=dict(size=6),
-            )
-        )
-
-    # --------------------------------------------------------
-    # Pronóstico ajustado
-    # --------------------------------------------------------
-
-    if not pron_est.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=pron_est["fecha"],
-                y=pron_est["nivel_prom_ajustado_m"],
-                mode="lines+markers",
-                name="Pronóstico ajustado",
-                line=dict(width=3, color="blue"),
-                marker=dict(size=8, color="blue"),
-            )
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=pron_est["fecha"],
-                y=pron_est["nivel_max_ajustado_m"],
-                mode="lines",
-                name="Máximo ajustado",
-                line=dict(width=1, dash="dot"),
-                visible="legendonly",
-            )
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=pron_est["fecha"],
-                y=pron_est["nivel_min_ajustado_m"],
-                mode="lines",
-                name="Mínimo ajustado",
-                line=dict(width=1, dash="dot"),
-                visible="legendonly",
-            )
-        )
-
-    # --------------------------------------------------------
-    # Línea vertical de inicio de pronóstico
-    # --------------------------------------------------------
-
-    if fecha_inicio_pron is not None and pd.notna(fecha_inicio_pron):
-        fecha_corte = pd.to_datetime(fecha_inicio_pron)
-
-        fig.add_shape(
-            type="line",
-            x0=fecha_corte,
-            x1=fecha_corte,
-            y0=0,
-            y1=1,
-            xref="x",
-            yref="paper",
-            line=dict(color="gray", width=2, dash="dash"),
-        )
-
-        fig.add_annotation(
-            x=fecha_corte,
-            y=1,
-            xref="x",
-            yref="paper",
-            text="Inicio pronóstico",
-            showarrow=False,
-            yanchor="bottom",
-            font=dict(size=11, color="gray"),
-        )
-
-    fig.update_layout(
-        height=430,
-        margin=dict(l=20, r=20, t=30, b=20),
-        xaxis_title="Fecha",
-        yaxis_title="Nivel (m)",
-        legend_title="Serie",
-        hovermode="x unified",
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.caption(
-        "El observado solo se grafica si es reciente. Si el último observado está muy antiguo, "
-        "se muestra únicamente el pronóstico. El gráfico incluye pronóstico original y ajustado."
-    )

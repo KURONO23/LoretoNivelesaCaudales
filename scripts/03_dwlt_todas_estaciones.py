@@ -36,7 +36,7 @@ MIN_DATOS_MES_OBS = 30
 # para forecast usa el mes del inicio del pronóstico.
 FORECAST_USA_MES_INICIO = True
 
-METODO_DWLT = "histograma_cdf_mensual_optimizado"
+METODO_DWLT = "cdf_empirica_mensual_ordenada"
 
 
 # ============================================================
@@ -231,7 +231,7 @@ def kge_2009(obs, sim):
 
 
 # ============================================================
-# DWLT OPTIMIZADO: HISTOGRAMA + CDF MENSUAL
+# DWLT OPTIMIZADO: CDF EMPÍRICA MENSUAL ORDENADA
 # ============================================================
 
 def limpiar_serie(values) -> np.ndarray:
@@ -247,11 +247,32 @@ def sturges_bins(n: int) -> int:
     return max(2, int(math.ceil(1 + math.log2(n))))
 
 
-def construir_cdf_histograma(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def construir_cdf_empirica(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Construye una CDF empírica mensual con valores históricos ordenados,
+    sin agrupar por intervalos ni histogramas.
+
+    Para DWLT:
+        x = valores históricos ordenados
+        p = probabilidad empírica de no excedencia
+
+    Se usa posición de Weibull:
+        p_i = i / (n + 1)
+
+    donde:
+        i = posición acumulada del valor ordenado
+        n = número total de datos válidos
+
+    Para valores repetidos, se agrupan los valores iguales y se usa la
+    probabilidad acumulada correspondiente al último valor repetido.
+    """
+
     values = limpiar_serie(values)
 
     if len(values) < 5:
         return np.array([]), np.array([])
+
+    values = np.sort(values)
 
     vmin = np.nanmin(values)
     vmax = np.nanmax(values)
@@ -261,29 +282,23 @@ def construir_cdf_histograma(values: np.ndarray) -> tuple[np.ndarray, np.ndarray
         p = np.array([0.0, 0.5, 1.0], dtype=float)
         return x, p
 
-    bins = sturges_bins(len(values))
-    counts, bin_edges = np.histogram(values, bins=bins)
-
-    if counts.sum() == 0:
-        return np.array([]), np.array([])
-
-    cdf = np.cumsum(counts).astype(float) / float(counts.sum())
-
-    x_points = np.concatenate(([bin_edges[0]], bin_edges[1:]))
-    p_points = np.concatenate(([0.0], cdf))
-
-    tmp = pd.DataFrame(
-        {
-            "x": x_points,
-            "p": p_points,
-        }
-    )
+    tmp = pd.DataFrame({"x": values})
 
     tmp = (
         tmp.groupby("x", as_index=False)
-        .agg(p=("p", "max"))
+        .size()
+        .rename(columns={"size": "n"})
         .sort_values("x")
+        .reset_index(drop=True)
     )
+
+    tmp["n_acum"] = tmp["n"].cumsum()
+    total = int(tmp["n"].sum())
+
+    if total <= 0:
+        return np.array([]), np.array([])
+
+    tmp["p"] = tmp["n_acum"] / float(total + 1)
 
     return tmp["x"].to_numpy(dtype=float), tmp["p"].to_numpy(dtype=float)
 
@@ -385,8 +400,8 @@ def construir_curvas_mensuales(
             }
             continue
 
-        sim_x, sim_p = construir_cdf_histograma(sim_mes)
-        obs_x, obs_p = construir_cdf_histograma(obs_mes)
+        sim_x, sim_p = construir_cdf_empirica(sim_mes)
+        obs_x, obs_p = construir_cdf_empirica(obs_mes)
 
         obs_p_inv, obs_x_inv = preparar_inversa_cdf(obs_x, obs_p)
 
@@ -629,7 +644,7 @@ def calcular_metricas_estacion(
 def main():
     print("=" * 100)
     print("DWLT PARA TODAS LAS ESTACIONES - LORETO")
-    print("MÉTODO: HISTOGRAMA + CDF MENSUAL OPTIMIZADO")
+    print("MÉTODO: CDF EMPÍRICA MENSUAL ORDENADA")
     print("=" * 100)
 
     require_file(GPKG_FILE)

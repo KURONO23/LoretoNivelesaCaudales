@@ -548,73 +548,120 @@ def crear_mapa_estaciones(
     pron_resumen: pd.DataFrame,
 ) -> folium.Map:
     if estaciones.empty:
-        return folium.Map(
+        mapa = folium.Map(
             location=[-5.0, -74.5],
             zoom_start=6,
             tiles="CartoDB positron",
             control_scale=True,
         )
+    else:
+        mapa = folium.Map(
+            location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
+            zoom_start=6,
+            tiles="CartoDB positron",
+            control_scale=True,
+        )
 
-    mapa = folium.Map(
-        location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
-        zoom_start=6,
-        tiles="CartoDB positron",
-        control_scale=True,
-    )
+    if not estaciones.empty:
+        for _, row in estaciones.iterrows():
+            estacion = str(row.get("estacion", "SIN_NOMBRE"))
+            comid = row.get("comid", None)
+            lat = row.get("lat", None)
+            lon = row.get("lon", None)
 
-    for _, row in estaciones.iterrows():
-        estacion = str(row.get("estacion", "SIN_NOMBRE"))
-        comid = row.get("comid", None)
-        lat = row.get("lat", None)
-        lon = row.get("lon", None)
+            if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
+                continue
 
-        if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
-            continue
+            comid_int = int(comid)
+            seleccionado = comid_sel is not None and comid_int == int(comid_sel)
 
-        comid_int = int(comid)
-        seleccionado = comid_sel is not None and comid_int == int(comid_sel)
+            color = "red" if seleccionado else "blue"
+            radio = 9 if seleccionado else 6
 
-        color = "red" if seleccionado else "blue"
-        radio = 9 if seleccionado else 6
+            info_extra = ""
 
-        info_extra = ""
+            if not pron_resumen.empty and "comid" in pron_resumen.columns:
+                tmp = pron_resumen[
+                    pd.to_numeric(pron_resumen["comid"], errors="coerce") == float(comid_int)
+                ]
 
-        if not pron_resumen.empty and "comid" in pron_resumen.columns:
-            tmp = pron_resumen[
-                pd.to_numeric(pron_resumen["comid"], errors="coerce") == float(comid_int)
-            ]
+                if not tmp.empty:
+                    nivel_prom = tmp["nivel_prom_7dias"].iloc[0]
+                    tendencia = tmp["tendencia"].iloc[0]
+                    ajuste = tmp["ajuste_continuidad"].iloc[0]
+                    offset = tmp["offset_ajuste_m"].iloc[0]
 
-            if not tmp.empty:
-                nivel_prom = tmp["nivel_prom_7dias"].iloc[0]
-                tendencia = tmp["tendencia"].iloc[0]
-                ajuste = tmp["ajuste_continuidad"].iloc[0]
-                offset = tmp["offset_ajuste_m"].iloc[0]
+                    info_extra = f"""
+                    <br><b>Nivel prom. ajustado 7 días:</b> {formato_num(nivel_prom)} m
+                    <br><b>Tendencia:</b> {tendencia}
+                    <br><b>Ajuste:</b> {ajuste}
+                    <br><b>Offset:</b> {formato_num(offset, 3)} m
+                    """
 
-                info_extra = f"""
-                <br><b>Nivel prom. ajustado 7 días:</b> {formato_num(nivel_prom)} m
-                <br><b>Tendencia:</b> {tendencia}
-                <br><b>Ajuste:</b> {ajuste}
-                <br><b>Offset:</b> {formato_num(offset, 3)} m
-                """
+            popup_html = f"""
+            <b>{estacion}</b><br>
+            <b>COMID:</b> {comid_int}
+            {info_extra}
+            <br><br><i>Haz click para seleccionar esta estación.</i>
+            """
 
-        popup_html = f"""
-        <b>{estacion}</b><br>
-        <b>COMID:</b> {comid_int}
-        {info_extra}
-        <br><br><i>Haz click para seleccionar esta estación.</i>
-        """
+            tooltip_val = f"{estacion}||{comid_int}"
 
-        tooltip_val = f"{estacion}||{comid_int}"
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=radio,
+                popup=folium.Popup(popup_html, max_width=300),
+                tooltip=tooltip_val,
+                color=color,
+                fill=True,
+                fill_opacity=0.85,
+            ).add_to(mapa)
 
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=radio,
-            popup=folium.Popup(popup_html, max_width=300),
-            tooltip=tooltip_val,
-            color=color,
-            fill=True,
-            fill_opacity=0.85,
-        ).add_to(mapa)
+    # --------------------------------------------------------
+    # Leyenda dentro del mapa - esquina inferior izquierda
+    # --------------------------------------------------------
+
+    legend_html = """
+    <div style="
+        position: fixed;
+        bottom: 30px;
+        left: 30px;
+        z-index: 9999;
+        background-color: white;
+        padding: 10px 12px;
+        border: 2px solid #cbd5e1;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        font-size: 13px;
+        color: #0f172a;
+        line-height: 1.5;
+    ">
+        <b>Leyenda</b><br>
+        <span style="
+            display:inline-block;
+            width:12px;
+            height:12px;
+            background:red;
+            border-radius:50%;
+            border:2px solid red;
+            margin-right:6px;
+        "></span>
+        Estación seleccionada<br>
+
+        <span style="
+            display:inline-block;
+            width:12px;
+            height:12px;
+            background:blue;
+            border-radius:50%;
+            border:2px solid blue;
+            margin-right:6px;
+        "></span>
+        Otras estaciones
+    </div>
+    """
+
+    mapa.get_root().html.add_child(folium.Element(legend_html))
 
     return mapa
 
@@ -1180,14 +1227,6 @@ with col_mapa:
 
         except Exception:
             pass
-
-    st.markdown("**Leyenda**")
-    st.markdown(
-        """
-        🔴 Estación seleccionada  
-        🔵 Otras estaciones  
-        """
-    )
 
     if not estacion_map_est.empty:
         lat_sel = estacion_map_est["lat"].iloc[0]

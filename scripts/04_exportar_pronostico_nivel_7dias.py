@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -46,45 +47,53 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def nombre_columna_ajustada(col: str) -> str:
-    """
-    Convierte correctamente:
-
-    nivel_min_m      -> nivel_min_ajustado_m
-    nivel_prom_m     -> nivel_prom_ajustado_m
-    nivel_max_m      -> nivel_max_ajustado_m
-    nivel_eta_eqm_m  -> nivel_eta_eqm_ajustado_m
-    """
-
     if col.endswith("_m"):
         return col[:-2] + "_ajustado_m"
-
     return col + "_ajustado"
 
 
 def clasificar_tendencia(x):
     if pd.isna(x):
         return "Sin dato"
-
     if x > 0.10:
         return "Ascendente"
-
     if x < -0.10:
         return "Descendente"
-
     return "Estable"
 
 
 def calidad_kge(kge):
     if pd.isna(kge):
         return "Sin evaluar"
-
     if kge >= 0.75:
         return "Buena"
-
     if kge >= 0.50:
         return "Moderada"
-
     return "Revisar"
+
+
+def obtener_anio_hidrologico(fecha) -> tuple[str, int, int]:
+    """
+    Año hidrológico:
+    - Inicia el 01 de setiembre.
+    - Termina el 31 de agosto del siguiente año.
+
+    Ejemplo:
+    fecha = 2026-08-07 -> AH_2025_2026
+    fecha = 2026-09-02 -> AH_2026_2027
+    """
+
+    fecha = pd.to_datetime(fecha)
+
+    if fecha.month >= 9:
+        anio_ini = fecha.year
+    else:
+        anio_ini = fecha.year - 1
+
+    anio_fin = anio_ini + 1
+    etiqueta = f"AH_{anio_ini}_{anio_fin}"
+
+    return etiqueta, anio_ini, anio_fin
 
 
 def preparar_observado(obs_path: Path) -> pd.DataFrame:
@@ -137,9 +146,7 @@ def aplicar_ajuste_continuidad(
         offset = último observado disponible hasta la fecha de inicio del pronóstico
                  - primer pronóstico DWLT
 
-    Importante:
-        Se usa observado <= fecha_inicio_pronóstico.
-        Esto permite usar el observado del mismo día si ya existe.
+    Se usa observado <= fecha_inicio_pronóstico.
     """
 
     pron = pron.copy()
@@ -231,9 +238,6 @@ def aplicar_ajuste_continuidad(
             if not serie_bruta.empty:
                 diag["primer_nivel_bruto"] = float(serie_bruta.iloc[0])
 
-        # CAMBIO CLAVE:
-        # Antes era obs_diario["fecha"] < fecha_inicio
-        # Ahora es <= para usar observado del mismo día si ya existe.
         obs_est = obs_diario[
             (obs_diario["comid"] == comid)
             & (obs_diario["fecha"] <= fecha_inicio)
@@ -386,6 +390,147 @@ def aplicar_ajuste_continuidad(
 
 
 # ============================================================
+# HISTÓRICO POR AÑO HIDROLÓGICO
+# ============================================================
+
+def actualizar_historico_anio_hidrologico(
+    pron: pd.DataFrame,
+    fecha_emision_pronostico,
+) -> tuple[Path, Path]:
+    """
+    Acumula el pronóstico de 7 días en un archivo histórico por año hidrológico.
+
+    Cada corrida guarda una copia del pronóstico actual con:
+    - fecha_emision_pronostico
+    - fecha_ejecucion_workflow
+    - anio_hidrologico
+
+    Si se vuelve a correr el workflow para la misma fecha de emisión,
+    reemplaza los registros anteriores de esa fecha.
+    """
+
+    fecha_emision = pd.to_datetime(fecha_emision_pronostico).normalize()
+    etiqueta_ah, _, _ = obtener_anio_hidrologico(fecha_emision)
+
+    out_parquet = OUTPUT_DIR / f"historico_pronosticos_{etiqueta_ah}.parquet"
+    out_csv = OUTPUT_DIR / f"historico_pronosticos_{etiqueta_ah}.csv"
+
+    fecha_ejecucion = pd.Timestamp(datetime.now(timezone.utc)).tz_convert(None)
+
+    nuevo = pron.copy()
+    nuevo["fecha_emision_pronostico"] = fecha_emision
+    nuevo["fecha_ejecucion_workflow"] = fecha_ejecucion
+    nuevo["anio_hidrologico"] = etiqueta_ah
+
+    cols_orden = [
+        "anio_hidrologico",
+        "fecha_emision_pronostico",
+        "fecha_ejecucion_workflow",
+        "estacion",
+        "comid",
+        "fecha",
+        "fecha_texto",
+
+        "nivel_prom_ajustado_m",
+        "nivel_min_ajustado_m",
+        "nivel_max_ajustado_m",
+        "nivel_p25_ajustado_m",
+        "nivel_p75_ajustado_m",
+
+        "nivel_prom_m",
+        "nivel_min_m",
+        "nivel_max_m",
+        "nivel_p25_m",
+        "nivel_p75_m",
+
+        "nivel_eta_eqm_ajustado_m",
+        "nivel_eta_scal_ajustado_m",
+        "nivel_gfs_ajustado_m",
+        "nivel_wrf_ajustado_m",
+
+        "nivel_eta_eqm_m",
+        "nivel_eta_scal_m",
+        "nivel_gfs_m",
+        "nivel_wrf_m",
+
+        "ajuste_continuidad",
+        "offset_ajuste_m",
+        "fecha_obs_ajuste",
+        "fecha_obs_ajuste_texto",
+        "nivel_obs_ajuste_m",
+        "dias_desde_obs_ajuste",
+        "advertencia_ajuste",
+    ]
+
+    cols_orden = [c for c in cols_orden if c in nuevo.columns]
+    nuevo = nuevo[cols_orden].copy()
+
+    if out_parquet.exists():
+        try:
+            hist = pd.read_parquet(out_parquet)
+            hist = normalizar_columnas(hist)
+        except Exception as e:
+            print(f"ADVERTENCIA: no se pudo leer histórico previo {out_parquet}: {e}")
+            hist = pd.DataFrame()
+    elif out_csv.exists():
+        try:
+            hist = pd.read_csv(out_csv)
+            hist = normalizar_columnas(hist)
+        except Exception as e:
+            print(f"ADVERTENCIA: no se pudo leer histórico previo {out_csv}: {e}")
+            hist = pd.DataFrame()
+    else:
+        hist = pd.DataFrame()
+
+    if not hist.empty:
+        for col in ["fecha_emision_pronostico", "fecha_ejecucion_workflow", "fecha", "fecha_obs_ajuste"]:
+            if col in hist.columns:
+                hist[col] = pd.to_datetime(hist[col], errors="coerce")
+
+        hist["comid"] = pd.to_numeric(hist["comid"], errors="coerce").astype("Int64")
+        nuevo["comid"] = pd.to_numeric(nuevo["comid"], errors="coerce").astype("Int64")
+
+        hist = pd.concat([hist, nuevo], ignore_index=True)
+    else:
+        hist = nuevo.copy()
+
+    for col in ["fecha_emision_pronostico", "fecha_ejecucion_workflow", "fecha", "fecha_obs_ajuste"]:
+        if col in hist.columns:
+            hist[col] = pd.to_datetime(hist[col], errors="coerce")
+
+    if "comid" in hist.columns:
+        hist["comid"] = pd.to_numeric(hist["comid"], errors="coerce").astype("Int64")
+
+    claves = [
+        "anio_hidrologico",
+        "fecha_emision_pronostico",
+        "estacion",
+        "comid",
+        "fecha",
+    ]
+
+    claves = [c for c in claves if c in hist.columns]
+
+    hist = hist.sort_values(
+        ["fecha_emision_pronostico", "estacion", "comid", "fecha", "fecha_ejecucion_workflow"]
+    ).copy()
+
+    hist = hist.drop_duplicates(subset=claves, keep="last").copy()
+
+    # Mantener solo registros del mismo año hidrológico del archivo.
+    hist = hist[hist["anio_hidrologico"] == etiqueta_ah].copy()
+
+    hist = hist.sort_values(
+        ["fecha_emision_pronostico", "estacion", "comid", "fecha"]
+    ).reset_index(drop=True)
+
+    hist.to_parquet(out_parquet, index=False)
+    hist.to_csv(out_csv, index=False, encoding="utf-8-sig")
+
+    return out_parquet, out_csv
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -393,6 +538,7 @@ def main() -> None:
     print("=" * 90)
     print("EXPORTANDO PRONÓSTICO DE NIVEL A 7 DÍAS - DWLT")
     print("CON AJUSTE DE CONTINUIDAD AL ÚLTIMO OBSERVADO")
+    print("Y ACTUALIZACIÓN DE HISTÓRICO POR AÑO HIDROLÓGICO")
     print("=" * 90)
 
     require_file(FORE_DWLT)
@@ -422,11 +568,13 @@ def main() -> None:
         raise ValueError("No hay fechas válidas en el pronóstico DWLT.")
 
     fechas_exportar = fechas_disponibles[:DIAS_EXPORTAR]
+    fecha_emision_pronostico = pd.to_datetime(fechas_exportar[0]).normalize()
 
     df = df[df["fecha"].isin(fechas_exportar)].copy()
 
     print(f"Fechas disponibles en forecast: {len(fechas_disponibles)}")
     print(f"Fechas exportadas: {len(fechas_exportar)}")
+    print(f"Fecha de emisión usada: {fecha_emision_pronostico.date()}")
     print(f"Inicio forecast exportado: {pd.to_datetime(fechas_exportar[0]).date()}")
     print(f"Fin forecast exportado: {pd.to_datetime(fechas_exportar[-1]).date()}")
 
@@ -444,7 +592,6 @@ def main() -> None:
         "comid",
         "fecha",
 
-        # Bruto
         "nivel_eta_eqm_m",
         "nivel_eta_scal_m",
         "nivel_gfs_m",
@@ -455,7 +602,6 @@ def main() -> None:
         "nivel_p75_m",
         "nivel_max_m",
 
-        # Ajustado
         "nivel_eta_eqm_ajustado_m",
         "nivel_eta_scal_ajustado_m",
         "nivel_gfs_ajustado_m",
@@ -466,7 +612,6 @@ def main() -> None:
         "nivel_p75_ajustado_m",
         "nivel_max_ajustado_m",
 
-        # Control
         "ajuste_continuidad",
         "offset_ajuste_m",
         "fecha_obs_ajuste",
@@ -500,33 +645,28 @@ def main() -> None:
         "fecha",
         "fecha_texto",
 
-        # Ajustado para operación
         "nivel_prom_ajustado_m",
         "nivel_min_ajustado_m",
         "nivel_max_ajustado_m",
         "nivel_p25_ajustado_m",
         "nivel_p75_ajustado_m",
 
-        # Bruto DWLT
         "nivel_prom_m",
         "nivel_min_m",
         "nivel_max_m",
         "nivel_p25_m",
         "nivel_p75_m",
 
-        # Modelos ajustados
         "nivel_eta_eqm_ajustado_m",
         "nivel_eta_scal_ajustado_m",
         "nivel_gfs_ajustado_m",
         "nivel_wrf_ajustado_m",
 
-        # Modelos brutos
         "nivel_eta_eqm_m",
         "nivel_eta_scal_m",
         "nivel_gfs_m",
         "nivel_wrf_m",
 
-        # Control
         "ajuste_continuidad",
         "offset_ajuste_m",
         "fecha_obs_ajuste",
@@ -683,10 +823,17 @@ def main() -> None:
         pivot_prom.to_excel(writer, sheet_name="pivot_nivel_prom_ajustado", index=False)
         diagnostico.to_excel(writer, sheet_name="diagnostico_ajuste", index=False)
 
+    hist_parquet, hist_csv = actualizar_historico_anio_hidrologico(
+        pron=pron,
+        fecha_emision_pronostico=fecha_emision_pronostico,
+    )
+
     print("\nArchivos generados:")
     print(f" - {OUT_XLSX}")
     print(f" - {OUT_CSV}")
     print(f" - {OUT_DIAG}")
+    print(f" - {hist_parquet}")
+    print(f" - {hist_csv}")
 
     print("\nDiagnóstico de ajuste de continuidad:")
     cols_diag_print = [

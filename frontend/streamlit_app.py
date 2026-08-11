@@ -35,6 +35,8 @@ DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
+LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
+
 DIAS_OBS_GRAFICO = 5
 MAX_DIAS_OBS_GRAFICO = 7
 
@@ -47,16 +49,18 @@ st.markdown(
     """
     <style>
     .main-title {
-        font-size: 2rem;
-        font-weight: 800;
-        color: #0f172a;
+        font-size: 2.15rem;
+        font-weight: 850;
+        color: #0f2f6b;
         margin-bottom: 0rem;
+        line-height: 1.05;
     }
 
     .subtitle {
-        font-size: 0.95rem;
-        color: #475569;
+        font-size: 1.02rem;
+        color: #14532d;
         margin-bottom: 1.2rem;
+        font-weight: 600;
     }
 
     .section-title {
@@ -953,18 +957,28 @@ if "nivel_m" in obs.columns:
 
 
 # ============================================================
-# CABECERA
+# CABECERA CON LOGO
 # ============================================================
 
-st.markdown(
-    '<div class="main-title">🌊 AMARU</div>',
-    unsafe_allow_html=True,
-)
+col_logo, col_titulo = st.columns([0.18, 0.82], gap="medium")
 
-st.markdown(
-    '<div class="subtitle">Análisis, Monitoreo y Pronostico de niveles de ríos Amazónicos peruanos</div>',
-    unsafe_allow_html=True,
-)
+with col_logo:
+    if LOGO_FILE.exists():
+        st.image(str(LOGO_FILE), width=135)
+    else:
+        st.warning("Logo no encontrado")
+
+with col_titulo:
+    st.markdown(
+        '<div class="main-title">AMARU</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="subtitle">Análisis, Monitoreo y Pronóstico de niveles de ríos Amazónicos peruanos</div>',
+        unsafe_allow_html=True,
+    )
+
 
 # ============================================================
 # VALIDACIÓN

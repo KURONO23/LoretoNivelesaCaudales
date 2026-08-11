@@ -17,7 +17,7 @@ from streamlit_folium import st_folium
 # ============================================================
 
 st.set_page_config(
-    page_title="Visor de Niveles Loreto",
+    page_title="AMARU",
     page_icon="🌊",
     layout="wide",
 )
@@ -957,15 +957,14 @@ if "nivel_m" in obs.columns:
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">🌊 Visor de niveles y pronóstico hidrológico - Loreto</div>',
+    '<div class="main-title">🌊 AMARU</div>',
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    '<div class="subtitle">Sistema automático SONICS + HidroMet + DWLT ajustado por continuidad</div>',
+    '<div class="subtitle">Análisis, Monitoreo y Pronostico de niveles de ríos Amazónicos peruanos</div>',
     unsafe_allow_html=True,
 )
-
 
 # ============================================================
 # VALIDACIÓN

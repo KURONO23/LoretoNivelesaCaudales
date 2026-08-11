@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-
+import base64
 import folium
 import numpy as np
 import pandas as pd
@@ -47,20 +47,41 @@ MAX_DIAS_OBS_GRAFICO = 7
 
 st.markdown(
     """
-    <style>
+        <style>
     .main-title {
-        font-size: 2.15rem;
-        font-weight: 850;
+        font-size: 3.2rem;
+        font-weight: 900;
         color: #0f2f6b;
-        margin-bottom: 0rem;
-        line-height: 1.05;
+        margin-bottom: 0.10rem;
+        line-height: 0.95;
+        letter-spacing: 1px;
     }
-
+    
     .subtitle {
-        font-size: 1.02rem;
+        font-size: 1.25rem;
         color: #14532d;
+        margin-bottom: 0rem;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+    
+    .header-box {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        margin-top: 0.5rem;
         margin-bottom: 1.2rem;
-        font-weight: 600;
+    }
+    
+    .header-logo {
+        width: 145px;
+        min-width: 145px;
+    }
+    
+    .header-text {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
 
     .section-title {
@@ -960,26 +981,39 @@ if "nivel_m" in obs.columns:
 # CABECERA CON LOGO
 # ============================================================
 
-col_logo, col_titulo = st.columns([0.18, 0.82], gap="medium")
-
-with col_logo:
-    if LOGO_FILE.exists():
-        st.image(str(LOGO_FILE), width=135)
-    else:
-        st.warning("Logo no encontrado")
-
-with col_titulo:
-    st.markdown(
-        '<div class="main-title">AMARU</div>',
-        unsafe_allow_html=True,
-    )
+if LOGO_FILE.exists():
+    logo_base64 = base64.b64encode(LOGO_FILE.read_bytes()).decode("utf-8")
 
     st.markdown(
-        '<div class="subtitle">Análisis, Monitoreo y Pronóstico de niveles de ríos Amazónicos peruanos</div>',
+        f"""
+        <div class="header-box">
+            <div>
+                <img src="data:image/png;base64,{logo_base64}" class="header-logo">
+            </div>
+            <div class="header-text">
+                <div class="main-title">AMARU</div>
+                <div class="subtitle">
+                    Análisis, Monitoreo y Pronóstico de niveles de ríos Amazónicos peruanos
+                </div>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-
-
+else:
+    st.markdown(
+        """
+        <div class="header-box">
+            <div class="header-text">
+                <div class="main-title">AMARU</div>
+                <div class="subtitle">
+                    Análisis, Monitoreo y Pronóstico de niveles de ríos Amazónicos peruanos
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 # ============================================================
 # VALIDACIÓN
 # ============================================================

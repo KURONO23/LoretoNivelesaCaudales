@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
 import re
 import sqlite3
 from pathlib import Path
-import base64
+
 import folium
 import numpy as np
 import pandas as pd
@@ -47,7 +48,7 @@ MAX_DIAS_OBS_GRAFICO = 7
 
 st.markdown(
     """
-        <style>
+    <style>
     .main-title {
         font-size: 3.2rem;
         font-weight: 900;
@@ -56,7 +57,7 @@ st.markdown(
         line-height: 0.95;
         letter-spacing: 1px;
     }
-    
+
     .subtitle {
         font-size: 1.25rem;
         color: #14532d;
@@ -64,7 +65,7 @@ st.markdown(
         font-weight: 700;
         line-height: 1.25;
     }
-    
+
     .header-box {
         display: flex;
         align-items: center;
@@ -72,12 +73,12 @@ st.markdown(
         margin-top: 0.5rem;
         margin-bottom: 1.2rem;
     }
-    
+
     .header-logo {
         width: 145px;
         min-width: 145px;
     }
-    
+
     .header-text {
         display: flex;
         flex-direction: column;
@@ -665,23 +666,29 @@ def graficar_pronostico_actual(
 
     pron_plot = pron_est.copy()
 
+    # Si existe observado reciente, no graficar como pronóstico los días que ya tienen observado.
     if mostrar_obs and not obs_plot.empty:
         fecha_ult_obs = obs_plot["fecha"].max()
         pron_plot = pron_plot[pron_plot["fecha"] > fecha_ult_obs].copy()
 
     if mostrar_obs and not obs_plot.empty:
         st.caption(
-            f"Última observación graficada: {pd.to_datetime(obs_plot['fecha'].iloc[-1]).strftime('%d/%m/%Y')} | {mensaje_obs}"
+            f"Última observación graficada: "
+            f"{pd.to_datetime(obs_plot['fecha'].iloc[-1]).strftime('%d/%m/%Y')} | {mensaje_obs}"
         )
     else:
         st.caption(mensaje_obs)
 
     st.markdown(
-        '<div class="section-title">Nivel observado actual + pronóstico original y ajustado de 7 días</div>',
+        '<div class="section-title">Nivel observado + pronóstico ajustado de 7 días</div>',
         unsafe_allow_html=True,
     )
 
     fig = go.Figure()
+
+    # --------------------------------------------------------
+    # Observado reciente
+    # --------------------------------------------------------
 
     if mostrar_obs and not obs_plot.empty:
         fig.add_trace(
@@ -695,52 +702,103 @@ def graficar_pronostico_actual(
             )
         )
 
-    if not pron_plot.empty:
+    # --------------------------------------------------------
+    # Rango ajustado min–max como banda de incertidumbre
+    # --------------------------------------------------------
+
+    if (
+        not pron_plot.empty
+        and "nivel_min_ajustado_m" in pron_plot.columns
+        and "nivel_max_ajustado_m" in pron_plot.columns
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=pron_plot["fecha"],
+                y=pron_plot["nivel_max_ajustado_m"],
+                mode="lines",
+                name="Máximo ajustado",
+                line=dict(width=0, color="rgba(59, 130, 246, 0)"),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=pron_plot["fecha"],
+                y=pron_plot["nivel_min_ajustado_m"],
+                mode="lines",
+                name="Rango ajustado min–max",
+                fill="tonexty",
+                fillcolor="rgba(59, 130, 246, 0.18)",
+                line=dict(width=0, color="rgba(59, 130, 246, 0)"),
+                hoverinfo="skip",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Modelos individuales ajustados
+    # Apagados por defecto para no saturar el gráfico.
+    # --------------------------------------------------------
+
+    modelos_ajustados = [
+        ("nivel_eta_eqm_ajustado_m", "ETA_eqm ajustado", "dot"),
+        ("nivel_eta_scal_ajustado_m", "ETA_scal ajustado", "dash"),
+        ("nivel_gfs_ajustado_m", "GFS ajustado", "dashdot"),
+        ("nivel_wrf_ajustado_m", "WRF ajustado", "longdash"),
+    ]
+
+    for col, nombre, estilo in modelos_ajustados:
+        if not pron_plot.empty and col in pron_plot.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=pron_plot["fecha"],
+                    y=pron_plot[col],
+                    mode="lines+markers",
+                    name=nombre,
+                    line=dict(width=1.5, dash=estilo),
+                    marker=dict(size=5),
+                    visible="legendonly",
+                )
+            )
+
+    # --------------------------------------------------------
+    # Pronóstico original medio
+    # Disponible en leyenda, apagado por defecto.
+    # --------------------------------------------------------
+
+    if not pron_plot.empty and "nivel_prom_m" in pron_plot.columns:
         fig.add_trace(
             go.Scatter(
                 x=pron_plot["fecha"],
                 y=pron_plot["nivel_prom_m"],
                 mode="lines+markers",
-                name="Pronóstico original",
+                name="Pronóstico original medio",
                 line=dict(width=2, dash="dash", color="gray"),
                 marker=dict(size=6, color="gray"),
+                visible="legendonly",
             )
         )
 
+    # --------------------------------------------------------
+    # Pronóstico ajustado medio principal
+    # --------------------------------------------------------
+
+    if not pron_plot.empty and "nivel_prom_ajustado_m" in pron_plot.columns:
         fig.add_trace(
             go.Scatter(
                 x=pron_plot["fecha"],
                 y=pron_plot["nivel_prom_ajustado_m"],
                 mode="lines+markers",
-                name="Pronóstico ajustado",
-                line=dict(width=3, color="blue"),
-                marker=dict(size=8, color="blue"),
+                name="Media ajustada de modelos",
+                line=dict(width=4, color="blue"),
+                marker=dict(size=9, color="blue"),
             )
         )
 
-        if "nivel_max_ajustado_m" in pron_plot.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=pron_plot["fecha"],
-                    y=pron_plot["nivel_max_ajustado_m"],
-                    mode="lines",
-                    name="Máximo ajustado",
-                    line=dict(width=1, dash="dot"),
-                    visible="legendonly",
-                )
-            )
-
-        if "nivel_min_ajustado_m" in pron_plot.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=pron_plot["fecha"],
-                    y=pron_plot["nivel_min_ajustado_m"],
-                    mode="lines",
-                    name="Mínimo ajustado",
-                    line=dict(width=1, dash="dot"),
-                    visible="legendonly",
-                )
-            )
+    # --------------------------------------------------------
+    # Línea vertical de referencia
+    # --------------------------------------------------------
 
     fecha_referencia = None
     texto_referencia = "Último observado"
@@ -775,15 +833,22 @@ def graficar_pronostico_actual(
         )
 
     fig.update_layout(
-        height=430,
+        height=460,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
-        yaxis_title="Nivel (m)",
+        yaxis_title="Nivel del río (m)",
         legend_title="Serie",
         hovermode="x unified",
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "La línea negra representa el nivel observado reciente. "
+        "La línea azul representa la media ajustada de los modelos. "
+        "La banda azul clara representa el rango ajustado min–max entre modelos. "
+        "Los modelos individuales ajustados pueden activarse desde la leyenda."
+    )
 
 
 def graficar_validacion_historica(
@@ -858,11 +923,15 @@ def graficar_validacion_historica(
     k4.metric("BIAS ajustado", f"{formato_num(metricas['bias'], 3)} m")
 
     st.markdown(
-        '<div class="section-title">Validación histórica: observado real vs pronóstico emitido</div>',
+        '<div class="section-title">Validación histórica: observado real vs pronóstico ajustado emitido</div>',
         unsafe_allow_html=True,
     )
 
     fig = go.Figure()
+
+    # --------------------------------------------------------
+    # Observado real
+    # --------------------------------------------------------
 
     if not obs_plot.empty:
         fig.add_trace(
@@ -876,51 +945,100 @@ def graficar_validacion_historica(
             )
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=pron_hist["fecha"],
-            y=pron_hist["nivel_prom_m"],
-            mode="lines+markers",
-            name="Pronóstico original emitido",
-            line=dict(width=2, dash="dash", color="gray"),
-            marker=dict(size=6, color="gray"),
-        )
-    )
+    # --------------------------------------------------------
+    # Banda ajustada min–max histórica
+    # --------------------------------------------------------
 
-    fig.add_trace(
-        go.Scatter(
-            x=pron_hist["fecha"],
-            y=pron_hist["nivel_prom_ajustado_m"],
-            mode="lines+markers",
-            name="Pronóstico ajustado emitido",
-            line=dict(width=3, color="blue"),
-            marker=dict(size=8, color="blue"),
-        )
-    )
-
-    if "nivel_max_ajustado_m" in pron_hist.columns:
+    if (
+        "nivel_min_ajustado_m" in pron_hist.columns
+        and "nivel_max_ajustado_m" in pron_hist.columns
+    ):
         fig.add_trace(
             go.Scatter(
                 x=pron_hist["fecha"],
                 y=pron_hist["nivel_max_ajustado_m"],
                 mode="lines",
                 name="Máximo ajustado emitido",
-                line=dict(width=1, dash="dot"),
-                visible="legendonly",
+                line=dict(width=0, color="rgba(59, 130, 246, 0)"),
+                showlegend=False,
+                hoverinfo="skip",
             )
         )
 
-    if "nivel_min_ajustado_m" in pron_hist.columns:
         fig.add_trace(
             go.Scatter(
                 x=pron_hist["fecha"],
                 y=pron_hist["nivel_min_ajustado_m"],
                 mode="lines",
-                name="Mínimo ajustado emitido",
-                line=dict(width=1, dash="dot"),
+                name="Rango ajustado min–max emitido",
+                fill="tonexty",
+                fillcolor="rgba(59, 130, 246, 0.18)",
+                line=dict(width=0, color="rgba(59, 130, 246, 0)"),
+                hoverinfo="skip",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Modelos individuales ajustados emitidos
+    # --------------------------------------------------------
+
+    modelos_ajustados = [
+        ("nivel_eta_eqm_ajustado_m", "ETA_eqm ajustado emitido", "dot"),
+        ("nivel_eta_scal_ajustado_m", "ETA_scal ajustado emitido", "dash"),
+        ("nivel_gfs_ajustado_m", "GFS ajustado emitido", "dashdot"),
+        ("nivel_wrf_ajustado_m", "WRF ajustado emitido", "longdash"),
+    ]
+
+    for col, nombre, estilo in modelos_ajustados:
+        if col in pron_hist.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=pron_hist["fecha"],
+                    y=pron_hist[col],
+                    mode="lines+markers",
+                    name=nombre,
+                    line=dict(width=1.5, dash=estilo),
+                    marker=dict(size=5),
+                    visible="legendonly",
+                )
+            )
+
+    # --------------------------------------------------------
+    # Pronóstico original medio emitido
+    # --------------------------------------------------------
+
+    if "nivel_prom_m" in pron_hist.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_hist["fecha"],
+                y=pron_hist["nivel_prom_m"],
+                mode="lines+markers",
+                name="Pronóstico original medio emitido",
+                line=dict(width=2, dash="dash", color="gray"),
+                marker=dict(size=6, color="gray"),
                 visible="legendonly",
             )
         )
+
+    # --------------------------------------------------------
+    # Media ajustada emitida
+    # --------------------------------------------------------
+
+    if "nivel_prom_ajustado_m" in pron_hist.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pron_hist["fecha"],
+                y=pron_hist["nivel_prom_ajustado_m"],
+                mode="lines+markers",
+                name="Media ajustada emitida",
+                line=dict(width=4, color="blue"),
+                marker=dict(size=9, color="blue"),
+            )
+        )
+
+    # --------------------------------------------------------
+    # Línea vertical de fecha de emisión
+    # --------------------------------------------------------
 
     fig.add_shape(
         type="line",
@@ -945,10 +1063,10 @@ def graficar_validacion_historica(
     )
 
     fig.update_layout(
-        height=460,
+        height=470,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
-        yaxis_title="Nivel (m)",
+        yaxis_title="Nivel del río (m)",
         legend_title="Serie",
         hovermode="x unified",
     )
@@ -956,9 +1074,10 @@ def graficar_validacion_historica(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "La línea negra muestra el nivel observado real. "
-        "La línea gris punteada muestra el pronóstico original emitido en la fecha seleccionada. "
-        "La línea azul muestra el pronóstico ajustado emitido en esa fecha."
+        "La línea negra representa el nivel observado real. "
+        "La línea azul representa la media ajustada del pronóstico emitido. "
+        "La banda azul clara representa el rango ajustado min–max entre modelos. "
+        "Los modelos individuales ajustados pueden activarse desde la leyenda."
     )
 
 
@@ -1014,6 +1133,8 @@ else:
         """,
         unsafe_allow_html=True,
     )
+
+
 # ============================================================
 # VALIDACIÓN
 # ============================================================
@@ -1319,3 +1440,4 @@ with col_panel:
                 hist_est=hist_est,
                 obs_est=obs_est,
             )
+

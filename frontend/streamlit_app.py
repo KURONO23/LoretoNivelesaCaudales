@@ -159,19 +159,6 @@ def clasificar_tendencia(delta) -> str:
     return "Estable"
 
 
-def clasificar_calidad(kge) -> str:
-    if kge is None or pd.isna(kge):
-        return "Sin evaluar"
-
-    if kge >= 0.75:
-        return "Buena"
-
-    if kge >= 0.50:
-        return "Moderada"
-
-    return "Revisar"
-
-
 def convertir_fechas(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -406,7 +393,6 @@ def validar_columnas_pronostico(pron: pd.DataFrame) -> None:
         "nivel_prom_ajustado_m",
         "nivel_min_ajustado_m",
         "nivel_max_ajustado_m",
-        "nivel_prom_m",
         "ajuste_continuidad",
         "offset_ajuste_m",
         "nivel_obs_ajuste_m",
@@ -437,7 +423,6 @@ def validar_columnas_historico(hist: pd.DataFrame) -> bool:
         "estacion",
         "comid",
         "fecha",
-        "nivel_prom_m",
         "nivel_prom_ajustado_m",
     ]
 
@@ -763,24 +748,6 @@ def graficar_pronostico_actual(
             )
 
     # --------------------------------------------------------
-    # Pronóstico original medio
-    # Disponible en leyenda, apagado por defecto.
-    # --------------------------------------------------------
-
-    if not pron_plot.empty and "nivel_prom_m" in pron_plot.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=pron_plot["fecha"],
-                y=pron_plot["nivel_prom_m"],
-                mode="lines+markers",
-                name="Pronóstico original medio",
-                line=dict(width=2, dash="dash", color="gray"),
-                marker=dict(size=6, color="gray"),
-                visible="legendonly",
-            )
-        )
-
-    # --------------------------------------------------------
     # Pronóstico ajustado medio principal
     # --------------------------------------------------------
 
@@ -1002,23 +969,6 @@ def graficar_validacion_historica(
                     visible="legendonly",
                 )
             )
-
-    # --------------------------------------------------------
-    # Pronóstico original medio emitido
-    # --------------------------------------------------------
-
-    if "nivel_prom_m" in pron_hist.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=pron_hist["fecha"],
-                y=pron_hist["nivel_prom_m"],
-                mode="lines+markers",
-                name="Pronóstico original medio emitido",
-                line=dict(width=2, dash="dash", color="gray"),
-                marker=dict(size=6, color="gray"),
-                visible="legendonly",
-            )
-        )
 
     # --------------------------------------------------------
     # Media ajustada emitida
@@ -1265,18 +1215,11 @@ elif not pron_est.empty and "comid" in pron_est.columns:
     if not valores_comid.empty:
         comid_sel = int(valores_comid.iloc[0])
 
-metricas_est = pd.DataFrame()
 obs_est = pd.DataFrame()
 estacion_map_est = pd.DataFrame()
 hist_est = pd.DataFrame()
 
 if comid_sel is not None:
-    metricas_est = (
-        metricas[pd.to_numeric(metricas["comid"], errors="coerce") == float(comid_sel)].copy()
-        if not metricas.empty and "comid" in metricas.columns
-        else pd.DataFrame()
-    )
-
     obs_est = (
         obs[pd.to_numeric(obs["comid"], errors="coerce") == float(comid_sel)].copy()
         if not obs.empty and "comid" in obs.columns
@@ -1373,6 +1316,7 @@ with col_panel:
         nivel_obs_reciente = None
 
         obs_d = observado_diario(obs_est)
+
         if not obs_d.empty:
             nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
 
@@ -1388,17 +1332,7 @@ with col_panel:
                 nivel_fin = serie_prom.iloc[-1]
                 tendencia_val = nivel_fin - nivel_inicio
 
-        kge = None
-        rmse = None
-
-        if not metricas_est.empty:
-            if "kge_2009" in metricas_est.columns:
-                kge = metricas_est["kge_2009"].iloc[0]
-
-            if "rmse_m" in metricas_est.columns:
-                rmse = metricas_est["rmse_m"].iloc[0]
-
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3 = st.columns(3)
 
         k1.metric(
             "Nivel observado reciente",
@@ -1414,12 +1348,6 @@ with col_panel:
             "Tendencia esperada",
             clasificar_tendencia(tendencia_val),
             delta=f"{formato_num(tendencia_val)} m" if tendencia_val is not None else None,
-        )
-
-        k4.metric(
-            "Calidad DWLT / KGE",
-            clasificar_calidad(kge),
-            delta=f"KGE {formato_num(kge, 3)} | RMSE {formato_num(rmse, 3)} m",
         )
 
         graficar_pronostico_actual(
@@ -1440,4 +1368,3 @@ with col_panel:
                 hist_est=hist_est,
                 obs_est=obs_est,
             )
-

@@ -251,27 +251,73 @@ def estilo_estado_mapa(estado: str) -> dict:
     estilos = {
         "descendiendo": {
             "bg": "#f59e0b",
-            "icono": "↘",
             "label": "Descendiendo",
         },
         "estable": {
             "bg": "#16a34a",
-            "icono": "=",
             "label": "Estable",
         },
         "subiendo": {
             "bg": "#2563eb",
-            "icono": "↗",
             "label": "Subiendo",
         },
         "sin_datos": {
             "bg": "#9ca3af",
-            "icono": "?",
             "label": "Sin datos",
         },
     }
 
     return estilos.get(estado, estilos["sin_datos"])
+
+
+def construir_svg_estado(estado: str) -> str:
+    if estado == "subiendo":
+        return """
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 16 L9 11 L13 15 L20 8"
+                  stroke="white" stroke-width="3.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 8 H20 V12"
+                  stroke="white" stroke-width="3.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        """
+
+    if estado == "descendiendo":
+        return """
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 8 L9 13 L13 9 L20 16"
+                  stroke="white" stroke-width="3.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 16 H20 V12"
+                  stroke="white" stroke-width="3.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        """
+
+    if estado == "estable":
+        return """
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 12 H19"
+                  stroke="white" stroke-width="3.8"
+                  stroke-linecap="round"/>
+        </svg>
+        """
+
+    return """
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+         xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="9"
+                stroke="white" stroke-width="2.6"/>
+        <path d="M9.5 9 C9.8 7.5 11 6.8 12.4 6.8 C14 6.8 15.2 7.8 15.2 9.3 C15.2 10.6 14.5 11.3 13.2 12.1 C12.4 12.6 12.1 13.1 12.1 14"
+              stroke="white" stroke-width="2.4"
+              stroke-linecap="round"/>
+        <circle cx="12" cy="17" r="1.4" fill="white"/>
+    </svg>
+    """
 
 
 def construir_icono_estacion(
@@ -281,12 +327,12 @@ def construir_icono_estacion(
     estilo = estilo_estado_mapa(estado)
 
     bg = estilo["bg"]
-    icono = estilo["icono"]
+    svg_icon = construir_svg_estado(estado)
 
-    tam = 28 if seleccionado else 24
-    radio = 7
+    tam = 31 if seleccionado else 27
     borde = "#ef4444" if seleccionado else "#ffffff"
     grosor_borde = 3 if seleccionado else 2
+    radio = 7
 
     html_icon = f"""
     <div style="
@@ -298,13 +344,10 @@ def construir_icono_estacion(
         display:flex;
         align-items:center;
         justify-content:center;
-        color:white;
-        font-size:16px;
-        font-weight:900;
         box-shadow:0 2px 6px rgba(0,0,0,0.35);
         line-height:1;
     ">
-        {icono}
+        {svg_icon}
     </div>
     """
 
@@ -338,7 +381,7 @@ def construir_etiqueta_estacion(
         border-radius:4px;
         border:1px solid {border_color};
         box-shadow:0 1px 3px rgba(0,0,0,0.18);
-        transform: translate(14px, -7px);
+        transform: translate(15px, -8px);
     ">
         {nombre_safe}
     </div>
@@ -748,7 +791,6 @@ def crear_mapa_estaciones(
 
             tooltip_val = f"{estacion}||{comid_int}"
 
-            # Marcador principal con ícono de estado
             folium.Marker(
                 location=[lat, lon],
                 icon=construir_icono_estacion(
@@ -759,7 +801,6 @@ def crear_mapa_estaciones(
                 tooltip=tooltip_val,
             ).add_to(mapa)
 
-            # Etiqueta pequeña con el nombre de la estación
             folium.Marker(
                 location=[lat, lon],
                 icon=construir_etiqueta_estacion(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import re
 import sqlite3
 from pathlib import Path
@@ -222,6 +223,132 @@ def convertir_numericos(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
+
+
+# ============================================================
+# FUNCIONES PARA ÍCONOS DEL MAPA
+# ============================================================
+
+def tendencia_a_estado_mapa(tendencia) -> str:
+    if tendencia is None or pd.isna(tendencia):
+        return "sin_datos"
+
+    t = normalizar_texto(tendencia)
+
+    if "DESC" in t:
+        return "descendiendo"
+
+    if "ASC" in t or "SUB" in t:
+        return "subiendo"
+
+    if "ESTABLE" in t:
+        return "estable"
+
+    return "sin_datos"
+
+
+def estilo_estado_mapa(estado: str) -> dict:
+    estilos = {
+        "descendiendo": {
+            "bg": "#f59e0b",
+            "icono": "↘",
+            "label": "Descendiendo",
+        },
+        "estable": {
+            "bg": "#16a34a",
+            "icono": "=",
+            "label": "Estable",
+        },
+        "subiendo": {
+            "bg": "#2563eb",
+            "icono": "↗",
+            "label": "Subiendo",
+        },
+        "sin_datos": {
+            "bg": "#9ca3af",
+            "icono": "?",
+            "label": "Sin datos",
+        },
+    }
+
+    return estilos.get(estado, estilos["sin_datos"])
+
+
+def construir_icono_estacion(
+    estado: str,
+    seleccionado: bool = False,
+) -> folium.DivIcon:
+    estilo = estilo_estado_mapa(estado)
+
+    bg = estilo["bg"]
+    icono = estilo["icono"]
+
+    tam = 28 if seleccionado else 24
+    radio = 7
+    borde = "#ef4444" if seleccionado else "#ffffff"
+    grosor_borde = 3 if seleccionado else 2
+
+    html_icon = f"""
+    <div style="
+        width:{tam}px;
+        height:{tam}px;
+        background:{bg};
+        border:{grosor_borde}px solid {borde};
+        border-radius:{radio}px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:white;
+        font-size:16px;
+        font-weight:900;
+        box-shadow:0 2px 6px rgba(0,0,0,0.35);
+        line-height:1;
+    ">
+        {icono}
+    </div>
+    """
+
+    return folium.DivIcon(
+        html=html_icon,
+        icon_size=(tam, tam),
+        icon_anchor=(tam // 2, tam // 2),
+    )
+
+
+def construir_etiqueta_estacion(
+    nombre: str,
+    seleccionado: bool = False,
+) -> folium.DivIcon:
+    nombre_safe = html.escape(str(nombre))
+
+    font_size = 11 if seleccionado else 9
+    font_weight = 800 if seleccionado else 600
+    color = "#111827" if seleccionado else "#374151"
+    border_color = "rgba(239,68,68,0.40)" if seleccionado else "rgba(0,0,0,0.12)"
+    fondo = "rgba(255,255,255,0.92)" if seleccionado else "rgba(255,255,255,0.72)"
+
+    html_label = f"""
+    <div style="
+        font-size:{font_size}px;
+        font-weight:{font_weight};
+        color:{color};
+        white-space:nowrap;
+        background:{fondo};
+        padding:1px 5px;
+        border-radius:4px;
+        border:1px solid {border_color};
+        box-shadow:0 1px 3px rgba(0,0,0,0.18);
+        transform: translate(14px, -7px);
+    ">
+        {nombre_safe}
+    </div>
+    """
+
+    return folium.DivIcon(
+        html=html_label,
+        icon_size=(140, 18),
+        icon_anchor=(0, 0),
+    )
 
 
 # ============================================================
@@ -586,10 +713,9 @@ def crear_mapa_estaciones(
             comid_int = int(comid)
             seleccionado = comid_sel is not None and comid_int == int(comid_sel)
 
-            color = "red" if seleccionado else "blue"
-            radio = 9 if seleccionado else 6
-
             info_extra = ""
+            tendencia = "Sin dato"
+            estado_mapa = "sin_datos"
 
             if not pron_resumen.empty and "comid" in pron_resumen.columns:
                 tmp = pron_resumen[
@@ -601,6 +727,7 @@ def crear_mapa_estaciones(
                     tendencia = tmp["tendencia"].iloc[0]
                     ajuste = tmp["ajuste_continuidad"].iloc[0]
                     offset = tmp["offset_ajuste_m"].iloc[0]
+                    estado_mapa = tendencia_a_estado_mapa(tendencia)
 
                     info_extra = f"""
                     <br><b>Nivel prom. ajustado 7 días:</b> {formato_num(nivel_prom)} m
@@ -609,23 +736,37 @@ def crear_mapa_estaciones(
                     <br><b>Offset:</b> {formato_num(offset, 3)} m
                     """
 
+            estilo = estilo_estado_mapa(estado_mapa)
+
             popup_html = f"""
-            <b>{estacion}</b><br>
+            <b>{html.escape(estacion)}</b><br>
             <b>COMID:</b> {comid_int}
+            <br><b>Estado:</b> {estilo["label"]}
             {info_extra}
             <br><br><i>Haz click para seleccionar esta estación.</i>
             """
 
             tooltip_val = f"{estacion}||{comid_int}"
 
-            folium.CircleMarker(
+            # Marcador principal con ícono de estado
+            folium.Marker(
                 location=[lat, lon],
-                radius=radio,
-                popup=folium.Popup(popup_html, max_width=300),
+                icon=construir_icono_estacion(
+                    estado=estado_mapa,
+                    seleccionado=seleccionado,
+                ),
+                popup=folium.Popup(popup_html, max_width=320),
                 tooltip=tooltip_val,
-                color=color,
-                fill=True,
-                fill_opacity=0.85,
+            ).add_to(mapa)
+
+            # Etiqueta pequeña con el nombre de la estación
+            folium.Marker(
+                location=[lat, lon],
+                icon=construir_etiqueta_estacion(
+                    nombre=estacion,
+                    seleccionado=seleccionado,
+                ),
+                interactive=False,
             ).add_to(mapa)
 
     return mapa
@@ -651,7 +792,6 @@ def graficar_pronostico_actual(
 
     pron_plot = pron_est.copy()
 
-    # Si existe observado reciente, no graficar como pronóstico los días que ya tienen observado.
     if mostrar_obs and not obs_plot.empty:
         fecha_ult_obs = obs_plot["fecha"].max()
         pron_plot = pron_plot[pron_plot["fecha"] > fecha_ult_obs].copy()
@@ -671,10 +811,6 @@ def graficar_pronostico_actual(
 
     fig = go.Figure()
 
-    # --------------------------------------------------------
-    # Observado reciente
-    # --------------------------------------------------------
-
     if mostrar_obs and not obs_plot.empty:
         fig.add_trace(
             go.Scatter(
@@ -686,10 +822,6 @@ def graficar_pronostico_actual(
                 marker=dict(size=8, color="black"),
             )
         )
-
-    # --------------------------------------------------------
-    # Rango ajustado min–max como banda de incertidumbre
-    # --------------------------------------------------------
 
     if (
         not pron_plot.empty
@@ -721,11 +853,6 @@ def graficar_pronostico_actual(
             )
         )
 
-    # --------------------------------------------------------
-    # Modelos individuales ajustados
-    # Apagados por defecto para no saturar el gráfico.
-    # --------------------------------------------------------
-
     modelos_ajustados = [
         ("nivel_eta_eqm_ajustado_m", "ETA_eqm ajustado", "dot"),
         ("nivel_eta_scal_ajustado_m", "ETA_scal ajustado", "dash"),
@@ -747,10 +874,6 @@ def graficar_pronostico_actual(
                 )
             )
 
-    # --------------------------------------------------------
-    # Pronóstico ajustado medio principal
-    # --------------------------------------------------------
-
     if not pron_plot.empty and "nivel_prom_ajustado_m" in pron_plot.columns:
         fig.add_trace(
             go.Scatter(
@@ -762,10 +885,6 @@ def graficar_pronostico_actual(
                 marker=dict(size=9, color="blue"),
             )
         )
-
-    # --------------------------------------------------------
-    # Línea vertical de referencia
-    # --------------------------------------------------------
 
     fecha_referencia = None
     texto_referencia = "Último observado"
@@ -896,10 +1015,6 @@ def graficar_validacion_historica(
 
     fig = go.Figure()
 
-    # --------------------------------------------------------
-    # Observado real
-    # --------------------------------------------------------
-
     if not obs_plot.empty:
         fig.add_trace(
             go.Scatter(
@@ -911,10 +1026,6 @@ def graficar_validacion_historica(
                 marker=dict(size=8, color="black"),
             )
         )
-
-    # --------------------------------------------------------
-    # Banda ajustada min–max histórica
-    # --------------------------------------------------------
 
     if (
         "nivel_min_ajustado_m" in pron_hist.columns
@@ -945,10 +1056,6 @@ def graficar_validacion_historica(
             )
         )
 
-    # --------------------------------------------------------
-    # Modelos individuales ajustados emitidos
-    # --------------------------------------------------------
-
     modelos_ajustados = [
         ("nivel_eta_eqm_ajustado_m", "ETA_eqm ajustado emitido", "dot"),
         ("nivel_eta_scal_ajustado_m", "ETA_scal ajustado emitido", "dash"),
@@ -970,10 +1077,6 @@ def graficar_validacion_historica(
                 )
             )
 
-    # --------------------------------------------------------
-    # Media ajustada emitida
-    # --------------------------------------------------------
-
     if "nivel_prom_ajustado_m" in pron_hist.columns:
         fig.add_trace(
             go.Scatter(
@@ -985,10 +1088,6 @@ def graficar_validacion_historica(
                 marker=dict(size=9, color="blue"),
             )
         )
-
-    # --------------------------------------------------------
-    # Línea vertical de fecha de emisión
-    # --------------------------------------------------------
 
     fig.add_shape(
         type="line",

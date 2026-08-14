@@ -367,20 +367,26 @@ def construir_etiqueta_estacion(
     font_size = 11 if seleccionado else 9
     font_weight = 800 if seleccionado else 600
     color = "#111827" if seleccionado else "#374151"
-    border_color = "rgba(239,68,68,0.40)" if seleccionado else "rgba(0,0,0,0.12)"
-    fondo = "rgba(255,255,255,0.92)" if seleccionado else "rgba(255,255,255,0.72)"
+    border_color = "rgba(239,68,68,0.45)" if seleccionado else "rgba(0,0,0,0.12)"
+    fondo = "rgba(255,255,255,0.96)" if seleccionado else "rgba(255,255,255,0.88)"
 
     html_label = f"""
     <div style="
+        display:inline-block;
+        width:auto;
+        min-width:auto;
+        max-width:none;
+        white-space:nowrap;
         font-size:{font_size}px;
         font-weight:{font_weight};
         color:{color};
-        white-space:nowrap;
         background:{fondo};
         padding:1px 5px;
         border-radius:4px;
         border:1px solid {border_color};
         box-shadow:0 1px 3px rgba(0,0,0,0.18);
+        line-height:1.15;
+        text-align:left;
         transform: translate(15px, -8px);
     ">
         {nombre_safe}
@@ -389,8 +395,9 @@ def construir_etiqueta_estacion(
 
     return folium.DivIcon(
         html=html_label,
-        icon_size=(140, 18),
+        icon_size=(1, 1),
         icon_anchor=(0, 0),
+        class_name="station-label",
     )
 
 

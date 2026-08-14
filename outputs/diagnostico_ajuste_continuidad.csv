@@ -1,7 +1,8 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
 Santa Clotilde,9032282,2026-08-14,2026-08-14,7.11,6.678,0.432,7.11,0.0,0,Sí,Ajuste aplicado
 Bellavista,9036028,2026-08-14,2026-08-14,4.83,5.965,-1.135,4.83,0.0,0,Sí,Ajuste aplicado
-Puerto Almendra,9037610,2026-08-14,2026-06-30,4.632,5.362,,5.362,,45,No,Observado muy antiguo para ajuste: 45 días
+Timicurillo,9036459,2026-08-14,2026-08-12,7.74,7.82,-0.08,7.74,0.0,2,Sí,Ajuste aplicado
+Puerto Almendra,9037610,2026-08-14,2026-08-14,2.75,5.201,-2.451,2.75,0.0,0,Sí,Offset alto: -2.45 m. Revisar estación.
 Santa María de Nanay,9037738,2026-08-14,2026-08-14,4.1,6.293,-2.193,4.1,0.0,0,Sí,Offset alto: -2.19 m. Revisar estación.
 ENAPU,9038134,2026-08-14,2026-08-13,5.32,108.064,-102.744,5.32,-0.0,1,Sí,Offset alto: -102.74 m. Revisar estación.
 Tamshiyacu,9038269,2026-08-14,2026-08-14,3.1,3.1,0.0,3.1,0.0,0,Sí,Ajuste aplicado

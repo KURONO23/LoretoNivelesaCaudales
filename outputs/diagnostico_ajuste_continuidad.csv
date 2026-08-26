@@ -1,19 +1,19 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-08-25,2026-08-14,7.11,6.557,,6.557,,11,No,Observado muy antiguo para ajuste: 11 días
-Bellavista,9036028,2026-08-25,2026-08-14,4.83,5.62,,5.62,,11,No,Observado muy antiguo para ajuste: 11 días
-Timicurillo,9036459,2026-08-25,2026-08-12,7.74,5.819,,5.819,,13,No,Observado muy antiguo para ajuste: 13 días
-Puerto Almendra,9037610,2026-08-25,2026-08-14,2.75,4.63,,4.63,,11,No,Observado muy antiguo para ajuste: 11 días
-Santa María de Nanay,9037738,2026-08-25,2026-08-14,4.1,5.588,,5.588,,11,No,Observado muy antiguo para ajuste: 11 días
-ENAPU,9038134,2026-08-25,2026-08-13,5.32,59.149,,59.149,,12,No,Observado muy antiguo para ajuste: 12 días
-Tamshiyacu,9038269,2026-08-25,2026-08-14,3.1,2.565,,2.565,,11,No,Observado muy antiguo para ajuste: 11 días
-Santa Rosa,9039635,2026-08-25,2026-08-14,4.39,4.238,,4.238,,11,No,Observado muy antiguo para ajuste: 11 días
-Borja,9040208,2026-08-25,2026-08-14,5.02,4.39,,4.39,,11,No,Observado muy antiguo para ajuste: 11 días
-San Regis,9040439,2026-08-25,2026-08-14,6.12,5.863,,5.863,,11,No,Observado muy antiguo para ajuste: 11 días
-Nauta,9040454,2026-08-25,2026-08-14,7.38,5.441,,5.441,,11,No,Observado muy antiguo para ajuste: 11 días
-San Lorenzo,9042153,2026-08-25,2025-09-30,7.19,9.743,,9.743,,329,No,Observado muy antiguo para ajuste: 329 días
-Genaro Herrera,9042214,2026-08-25,2026-08-14,7.37,6.387,,6.387,,11,No,Observado muy antiguo para ajuste: 11 días
-Angamos,9043370,2026-08-25,2026-08-14,2.8,7.855,,7.855,,11,No,Observado muy antiguo para ajuste: 11 días
-Requena,9043425,2026-08-25,2026-08-14,6.54,6.002,,6.002,,11,No,Observado muy antiguo para ajuste: 11 días
-Lagunas,9043597,2026-08-25,2026-08-14,4.79,5.079,,5.079,,11,No,Observado muy antiguo para ajuste: 11 días
-Flor de Punga,9044756,2026-08-25,2026-05-14,22.8,7.73,,7.73,,103,No,Observado muy antiguo para ajuste: 103 días
-Contamana,9053555,2026-08-25,2026-08-14,6.03,11.815,,11.815,,11,No,Observado muy antiguo para ajuste: 11 días
+Santa Clotilde,9032282,2026-08-26,2026-08-14,7.11,6.553,,6.553,,12,No,Observado muy antiguo para ajuste: 12 días
+Bellavista,9036028,2026-08-26,2026-08-14,4.83,5.6,,5.6,,12,No,Observado muy antiguo para ajuste: 12 días
+Timicurillo,9036459,2026-08-26,2026-08-12,7.74,5.809,,5.809,,14,No,Observado muy antiguo para ajuste: 14 días
+Puerto Almendra,9037610,2026-08-26,2026-08-14,2.75,4.48,,4.48,,12,No,Observado muy antiguo para ajuste: 12 días
+Santa María de Nanay,9037738,2026-08-26,2026-08-14,4.1,5.92,,5.92,,12,No,Observado muy antiguo para ajuste: 12 días
+ENAPU,9038134,2026-08-26,2026-08-13,5.32,58.015,,58.015,,13,No,Observado muy antiguo para ajuste: 13 días
+Tamshiyacu,9038269,2026-08-26,2026-08-14,3.1,2.558,,2.558,,12,No,Observado muy antiguo para ajuste: 12 días
+Santa Rosa,9039635,2026-08-26,2026-08-14,4.39,4.131,,4.131,,12,No,Observado muy antiguo para ajuste: 12 días
+Borja,9040208,2026-08-26,2026-08-14,5.02,4.421,,4.421,,12,No,Observado muy antiguo para ajuste: 12 días
+San Regis,9040439,2026-08-26,2026-08-14,6.12,5.76,,5.76,,12,No,Observado muy antiguo para ajuste: 12 días
+Nauta,9040454,2026-08-26,2026-08-14,7.38,5.43,,5.43,,12,No,Observado muy antiguo para ajuste: 12 días
+San Lorenzo,9042153,2026-08-26,2025-09-30,7.19,9.697,,9.697,,330,No,Observado muy antiguo para ajuste: 330 días
+Genaro Herrera,9042214,2026-08-26,2026-08-14,7.37,6.187,,6.187,,12,No,Observado muy antiguo para ajuste: 12 días
+Angamos,9043370,2026-08-26,2026-08-14,2.8,7.821,,7.821,,12,No,Observado muy antiguo para ajuste: 12 días
+Requena,9043425,2026-08-26,2026-08-14,6.54,5.962,,5.962,,12,No,Observado muy antiguo para ajuste: 12 días
+Lagunas,9043597,2026-08-26,2026-08-14,4.79,5.053,,5.053,,12,No,Observado muy antiguo para ajuste: 12 días
+Flor de Punga,9044756,2026-08-26,2026-05-14,22.8,7.716,,7.716,,104,No,Observado muy antiguo para ajuste: 104 días
+Contamana,9053555,2026-08-26,2026-08-14,6.03,11.863,,11.863,,12,No,Observado muy antiguo para ajuste: 12 días

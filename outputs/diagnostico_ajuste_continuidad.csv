@@ -1,19 +1,19 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-08-29,2026-08-14,7.11,6.583,,6.583,,15,No,Observado muy antiguo para ajuste: 15 días
-Bellavista,9036028,2026-08-29,2026-08-14,4.83,5.565,,5.565,,15,No,Observado muy antiguo para ajuste: 15 días
-Timicurillo,9036459,2026-08-29,2026-08-12,7.74,5.764,,5.764,,17,No,Observado muy antiguo para ajuste: 17 días
-Puerto Almendra,9037610,2026-08-29,2026-08-14,2.75,4.937,,4.937,,15,No,Observado muy antiguo para ajuste: 15 días
-Santa María de Nanay,9037738,2026-08-29,2026-08-14,4.1,5.818,,5.818,,15,No,Observado muy antiguo para ajuste: 15 días
-ENAPU,9038134,2026-08-29,2026-08-13,5.32,53.948,,53.948,,16,No,Observado muy antiguo para ajuste: 16 días
-Tamshiyacu,9038269,2026-08-29,2026-08-14,3.1,2.414,,2.414,,15,No,Observado muy antiguo para ajuste: 15 días
-Santa Rosa,9039635,2026-08-29,2026-08-14,4.39,4.003,,4.003,,15,No,Observado muy antiguo para ajuste: 15 días
-Borja,9040208,2026-08-29,2026-08-14,5.02,4.447,,4.447,,15,No,Observado muy antiguo para ajuste: 15 días
-San Regis,9040439,2026-08-29,2026-08-14,6.12,5.506,,5.506,,15,No,Observado muy antiguo para ajuste: 15 días
-Nauta,9040454,2026-08-29,2026-08-14,7.38,5.188,,5.188,,15,No,Observado muy antiguo para ajuste: 15 días
-San Lorenzo,9042153,2026-08-29,2025-09-30,7.19,9.698,,9.698,,333,No,Observado muy antiguo para ajuste: 333 días
-Genaro Herrera,9042214,2026-08-29,2026-08-14,7.37,6.19,,6.19,,15,No,Observado muy antiguo para ajuste: 15 días
-Angamos,9043370,2026-08-29,2026-08-14,2.8,7.742,,7.742,,15,No,Observado muy antiguo para ajuste: 15 días
-Requena,9043425,2026-08-29,2026-08-14,6.54,5.861,,5.861,,15,No,Observado muy antiguo para ajuste: 15 días
-Lagunas,9043597,2026-08-29,2026-08-14,4.79,5.077,,5.077,,15,No,Observado muy antiguo para ajuste: 15 días
-Flor de Punga,9044756,2026-08-29,2026-05-14,22.8,8.049,,8.049,,107,No,Observado muy antiguo para ajuste: 107 días
-Contamana,9053555,2026-08-29,2026-08-14,6.03,12.219,,12.219,,15,No,Observado muy antiguo para ajuste: 15 días
+Santa Clotilde,9032282,2026-08-30,2026-08-14,7.11,6.581,,6.581,,16,No,Observado muy antiguo para ajuste: 16 días
+Bellavista,9036028,2026-08-30,2026-08-14,4.83,5.58,,5.58,,16,No,Observado muy antiguo para ajuste: 16 días
+Timicurillo,9036459,2026-08-30,2026-08-12,7.74,5.693,,5.693,,18,No,Observado muy antiguo para ajuste: 18 días
+Puerto Almendra,9037610,2026-08-30,2026-08-14,2.75,4.544,,4.544,,16,No,Observado muy antiguo para ajuste: 16 días
+Santa María de Nanay,9037738,2026-08-30,2026-08-14,4.1,5.034,,5.034,,16,No,Observado muy antiguo para ajuste: 16 días
+ENAPU,9038134,2026-08-30,2026-08-13,5.32,54.24,,54.24,,17,No,Observado muy antiguo para ajuste: 17 días
+Tamshiyacu,9038269,2026-08-30,2026-08-14,3.1,2.387,,2.387,,16,No,Observado muy antiguo para ajuste: 16 días
+Santa Rosa,9039635,2026-08-30,2026-08-14,4.39,3.921,,3.921,,16,No,Observado muy antiguo para ajuste: 16 días
+Borja,9040208,2026-08-30,2026-08-14,5.02,4.38,,4.38,,16,No,Observado muy antiguo para ajuste: 16 días
+San Regis,9040439,2026-08-30,2026-08-14,6.12,5.461,,5.461,,16,No,Observado muy antiguo para ajuste: 16 días
+Nauta,9040454,2026-08-30,2026-08-14,7.38,5.14,,5.14,,16,No,Observado muy antiguo para ajuste: 16 días
+San Lorenzo,9042153,2026-08-30,2025-09-30,7.19,9.708,,9.708,,334,No,Observado muy antiguo para ajuste: 334 días
+Genaro Herrera,9042214,2026-08-30,2026-08-14,7.37,6.516,,6.516,,16,No,Observado muy antiguo para ajuste: 16 días
+Angamos,9043370,2026-08-30,2026-08-14,2.8,7.697,,7.697,,16,No,Observado muy antiguo para ajuste: 16 días
+Requena,9043425,2026-08-30,2026-08-14,6.54,5.834,,5.834,,16,No,Observado muy antiguo para ajuste: 16 días
+Lagunas,9043597,2026-08-30,2026-08-14,4.79,5.212,,5.212,,16,No,Observado muy antiguo para ajuste: 16 días
+Flor de Punga,9044756,2026-08-30,2026-05-14,22.8,8.143,,8.143,,108,No,Observado muy antiguo para ajuste: 108 días
+Contamana,9053555,2026-08-30,2026-08-14,6.03,12.255,,12.255,,16,No,Observado muy antiguo para ajuste: 16 días

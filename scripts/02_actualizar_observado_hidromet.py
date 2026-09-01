@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 
 # ============================================================
@@ -41,11 +41,9 @@ OBS_DRIVE_FOLDER_ID = os.getenv("OBS_DRIVE_FOLDER_ID", "").strip()
 GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
 
 # Periodo de consulta API HidroMet.
-# Se consulta desde 2025-01-01 para asegurar más de 365 días recientes.
 OBS_API_START_DATE = os.getenv("OBS_API_START_DATE", "2025-01-01")
 OBS_API_END_DATE = os.getenv("OBS_API_END_DATE", date.today().strftime("%Y-%m-%d"))
 
-# Activar o desactivar API HidroMet
 OBS_USAR_API = os.getenv("OBS_USAR_API", "true").strip().lower() in [
     "1",
     "true",
@@ -54,7 +52,6 @@ OBS_USAR_API = os.getenv("OBS_USAR_API", "true").strip().lower() in [
     "sí",
 ]
 
-# Activar o desactivar lectura de Excel/CSV manuales desde Drive
 OBS_USAR_DRIVE_MANUAL = os.getenv("OBS_USAR_DRIVE_MANUAL", "true").strip().lower() in [
     "1",
     "true",
@@ -63,7 +60,16 @@ OBS_USAR_DRIVE_MANUAL = os.getenv("OBS_USAR_DRIVE_MANUAL", "true").strip().lower
     "sí",
 ]
 
-# Carpetas locales opcionales donde puede buscar Excel/CSV manuales
+# Esta opción controla si el script también debe completar/sobrescribir
+# los Excel existentes en Google Drive.
+OBS_ACTUALIZAR_EXCEL_DRIVE = os.getenv("OBS_ACTUALIZAR_EXCEL_DRIVE", "true").strip().lower() in [
+    "1",
+    "true",
+    "yes",
+    "si",
+    "sí",
+]
+
 CARPETAS_MANUALES_LOCALES = [
     BASE_DIR / "Data" / "observados_manuales",
     BASE_DIR / "observados_manuales",
@@ -95,7 +101,6 @@ ESTACIONES_API = {
     32: "ANGAMOS",
 }
 
-# Estaciones manuales o estaciones con nombres que pueden variar
 COMID_MANUAL_OVERRIDES = {
     "TIMICURILLO": 9036459,
     "PUERTO ALMENDRA": 9037610,
@@ -153,7 +158,6 @@ def rango_meses(fecha_ini: str, fecha_fin: str) -> list[tuple[pd.Timestamp, pd.T
         tramo_fin = min(mes_fin, fin)
 
         meses.append((tramo_ini, tramo_fin))
-
         actual = actual + pd.offsets.MonthBegin(1)
 
     return meses
@@ -164,20 +168,6 @@ def reconstruir_fechas_si_necesario(
     fecha_ini: pd.Timestamp,
     fecha_fin: pd.Timestamp,
 ) -> pd.DataFrame:
-    """
-    Corrige fechas defectuosas del API de HidroMet.
-
-    Antes el API devolvía casos como:
-    0001-01-01T00:00:00
-
-    Esta función corrige dos escenarios:
-    1. Todo el bloque viene con fechas malas.
-    2. El bloque viene mixto: algunas fechas buenas y otras malas.
-
-    Si el API devuelve exactamente una fila por día solicitado,
-    se reconstruyen todas las fechas por orden.
-    """
-
     df = df.copy()
 
     if "FECHA" not in df.columns:
@@ -188,14 +178,12 @@ def reconstruir_fechas_si_necesario(
 
     fechas_esperadas = pd.date_range(fecha_ini, fecha_fin, freq="D")
 
-    # Caso más seguro:
-    # el API normalmente devuelve una fila por día.
-    # Si la cantidad coincide, reconstruimos por orden de fila.
+    # Si el API devuelve una fila por día, reconstruimos por orden.
+    # Esto corrige fechas 0001-01-01 y casos mixtos.
     if len(fechas_esperadas) == len(df):
         df["FECHA"] = fechas_esperadas
         return df
 
-    # Si no coincide, usamos las fechas válidas y anulamos las inválidas.
     df["FECHA"] = fechas
     df.loc[fechas_invalidas, "FECHA"] = pd.NaT
 
@@ -243,11 +231,11 @@ def detectar_columna(df: pd.DataFrame, candidatos: list[str]) -> str | None:
 
 def calcular_nivel_api(tmp: pd.DataFrame) -> pd.Series | None:
     """
-    Calcula nivel_m desde el API.
+    Calcula nivel_m desde el API o desde Excel.
 
     Prioridad:
-    1. Usar H_PROM / NIVEL / nivel_m si existe.
-    2. Si no existe, usar promedio de H6, H10, H14, H18.
+    1. H_PROM / NIVEL / nivel_m.
+    2. Promedio de H6, H10, H14, H18.
     """
 
     col_hprom = detectar_columna(
@@ -279,13 +267,9 @@ def calcular_nivel_api(tmp: pd.DataFrame) -> pd.Series | None:
         return None
 
     valores_horarios = tmp[cols_horarias].apply(pd.to_numeric, errors="coerce")
-
-    # Convertir -999 a NaN antes de promediar
     valores_horarios = valores_horarios.replace(-999, np.nan)
 
-    nivel_m = valores_horarios.mean(axis=1, skipna=True)
-
-    return nivel_m
+    return valores_horarios.mean(axis=1, skipna=True)
 
 
 # ============================================================
@@ -422,6 +406,7 @@ def obtener_hidromet_api_estacion(
             out = out[out["nivel_m"] != -999].copy()
 
             if not out.empty:
+                out["fecha"] = out["fecha"].dt.normalize()
                 partes.append(out)
 
                 print(
@@ -438,9 +423,7 @@ def obtener_hidromet_api_estacion(
     if not partes:
         return pd.DataFrame()
 
-    df = pd.concat(partes, ignore_index=True)
-
-    return df
+    return pd.concat(partes, ignore_index=True)
 
 
 def obtener_hidromet_api_todas(mapa_comid: dict[str, int]) -> pd.DataFrame:
@@ -483,12 +466,12 @@ def obtener_hidromet_api_todas(mapa_comid: dict[str, int]) -> pd.DataFrame:
 
 
 # ============================================================
-# GOOGLE DRIVE — LECTURA DE EXCEL/CSV MANUALES
+# GOOGLE DRIVE
 # ============================================================
 
 def construir_drive_service():
     if not GOOGLE_SERVICE_JSON:
-        print("ADVERTENCIA: GOOGLE_SERVICE_JSON no está definido. No se leerá Drive.")
+        print("ADVERTENCIA: GOOGLE_SERVICE_JSON no está definido. No se leerá ni actualizará Drive.")
         return None
 
     try:
@@ -498,9 +481,12 @@ def construir_drive_service():
         return None
 
     try:
+        # Importante:
+        # Usamos drive completo para poder actualizar archivos existentes.
+        # No se crearán archivos nuevos; solo se hará files().update().
         creds = service_account.Credentials.from_service_account_info(
             info,
-            scopes=["https://www.googleapis.com/auth/drive.readonly"],
+            scopes=["https://www.googleapis.com/auth/drive"],
         )
 
         service = build("drive", "v3", credentials=creds)
@@ -582,6 +568,32 @@ def descargar_archivo_drive(service, file_id: str, nombre: str, carpeta_tmp: Pat
         return None
 
 
+def actualizar_archivo_excel_drive(service, file_id: str, path_excel: Path) -> bool:
+    """
+    Sobrescribe un archivo Excel existente en Google Drive.
+    No crea archivos nuevos.
+    """
+
+    try:
+        media = MediaFileUpload(
+            str(path_excel),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resumable=True,
+        )
+
+        service.files().update(
+            fileId=file_id,
+            media_body=media,
+            supportsAllDrives=True,
+        ).execute()
+
+        return True
+
+    except Exception as e:
+        print(f"  ADVERTENCIA: No se pudo actualizar Excel en Drive: {e}")
+        return False
+
+
 # ============================================================
 # LECTURA DE EXCEL / CSV MANUALES
 # ============================================================
@@ -625,8 +637,6 @@ def leer_archivo_observado_manual(path: Path, mapa_comid: dict[str, int]) -> pd.
     col_estacion = detectar_columna(df, ["ESTACION_NOMBRE", "ESTACION", "NOMBRE", "estacion_nombre"])
     col_key = detectar_columna(df, ["ESTACION_KEY", "estacion_key"])
 
-    # Si un Excel manual tampoco trae H_PROM pero trae H6/H10/H14/H18,
-    # también calculamos el promedio diario.
     nivel_manual = None
 
     if col_nivel is not None:
@@ -659,7 +669,6 @@ def leer_archivo_observado_manual(path: Path, mapa_comid: dict[str, int]) -> pd.
         estacion_nombre = estacion_desde_archivo
 
     estacion_key = normalizar_texto(estacion_nombre)
-
     archivo_key = normalizar_texto(estacion_desde_archivo)
 
     if archivo_key in COMID_MANUAL_OVERRIDES:
@@ -731,7 +740,11 @@ def leer_observados_manuales_locales(mapa_comid: dict[str, int]) -> pd.DataFrame
     return pd.concat(partes, ignore_index=True)
 
 
-def leer_observados_manuales_drive(mapa_comid: dict[str, int]) -> pd.DataFrame:
+def leer_observados_manuales_drive(
+    mapa_comid: dict[str, int],
+    service,
+    archivos_drive: list[dict],
+) -> pd.DataFrame:
     if not OBS_USAR_DRIVE_MANUAL:
         print("Lectura de Drive manual desactivada por OBS_USAR_DRIVE_MANUAL=false")
         return pd.DataFrame()
@@ -739,8 +752,6 @@ def leer_observados_manuales_drive(mapa_comid: dict[str, int]) -> pd.DataFrame:
     if not OBS_DRIVE_FOLDER_ID:
         print("ADVERTENCIA: OBS_DRIVE_FOLDER_ID no definido. No se leerá Drive.")
         return pd.DataFrame()
-
-    service = construir_drive_service()
 
     if service is None:
         return pd.DataFrame()
@@ -751,20 +762,18 @@ def leer_observados_manuales_drive(mapa_comid: dict[str, int]) -> pd.DataFrame:
     print("============================================================")
     print(f"Carpeta Drive: {OBS_DRIVE_FOLDER_ID}")
 
-    archivos = listar_archivos_drive(service, OBS_DRIVE_FOLDER_ID)
-
-    if not archivos:
+    if not archivos_drive:
         print("No se encontraron archivos Excel/CSV en Drive.")
         return pd.DataFrame()
 
-    print(f"Archivos encontrados en Drive: {len(archivos)}")
+    print(f"Archivos encontrados en Drive: {len(archivos_drive)}")
 
     partes = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
         carpeta_tmp = Path(tmpdir)
 
-        for f in archivos:
+        for f in archivos_drive:
             nombre = f.get("name", "")
             file_id = f.get("id", "")
 
@@ -838,9 +847,7 @@ def consolidar_observados(partes: list[pd.DataFrame]) -> pd.DataFrame:
     df["estacion_nombre"] = df["estacion_nombre"].astype(str).str.strip()
     df["estacion_key"] = df["estacion_nombre"].apply(normalizar_texto)
 
-    # Prioridad de fuente:
-    # Excel manual aporta histórico largo.
-    # API HidroMet debe ganar cuando hay fecha duplicada porque es la actualización reciente.
+    # API gana sobre Excel cuando hay fecha duplicada.
     df["prioridad_fuente"] = np.where(
         df["fuente"].astype(str).str.contains("HidroMet API", case=False, na=False),
         2,
@@ -870,6 +877,183 @@ def consolidar_observados(partes: list[pd.DataFrame]) -> pd.DataFrame:
 
     return df
 
+
+# ============================================================
+# ACTUALIZACIÓN DE EXCEL EN DRIVE
+# ============================================================
+
+def construir_indice_drive_por_estacion(archivos_drive: list[dict]) -> dict[str, dict]:
+    indice = {}
+
+    for f in archivos_drive:
+        nombre = f.get("name", "")
+
+        if not nombre.lower().endswith((".xlsx", ".xls")):
+            continue
+
+        key = limpiar_nombre_archivo(nombre)
+
+        if key:
+            indice[key] = f
+
+    return indice
+
+
+def preparar_excel_estacion(df_est: pd.DataFrame, estacion_nombre: str, path_salida: Path) -> None:
+    df_est = df_est.copy()
+
+    df_est["fecha"] = pd.to_datetime(df_est["fecha"], errors="coerce").dt.normalize()
+    df_est["nivel_m"] = pd.to_numeric(df_est["nivel_m"], errors="coerce")
+
+    df_est = df_est.dropna(subset=["fecha", "nivel_m"]).copy()
+    df_est = df_est.sort_values("fecha").copy()
+
+    # Usamos el último id_estacion válido si existe.
+    id_validos = pd.to_numeric(df_est["id_estacion"], errors="coerce").dropna()
+
+    if not id_validos.empty:
+        id_estacion = int(id_validos.iloc[-1])
+    else:
+        id_estacion = ""
+
+    salida = pd.DataFrame()
+    salida["ID_ESTACION"] = id_estacion
+    salida["ESTACION"] = estacion_nombre
+    salida["FECHA"] = df_est["fecha"].dt.strftime("%Y-%m-%d")
+    salida["H_PROM"] = df_est["nivel_m"].round(3)
+
+    salida.to_excel(path_salida, index=False)
+
+
+def sincronizar_exceles_drive(
+    observado: pd.DataFrame,
+    service,
+    archivos_drive: list[dict],
+) -> None:
+    if not OBS_ACTUALIZAR_EXCEL_DRIVE:
+        print("")
+        print("Actualización de Excel Drive desactivada por OBS_ACTUALIZAR_EXCEL_DRIVE=false")
+        return
+
+    if service is None:
+        print("")
+        print("ADVERTENCIA: No hay servicio Drive. No se actualizarán Excel en Drive.")
+        return
+
+    if not archivos_drive:
+        print("")
+        print("ADVERTENCIA: No hay archivos Drive. No se actualizarán Excel en Drive.")
+        return
+
+    if observado.empty:
+        print("")
+        print("ADVERTENCIA: Observado vacío. No se actualizarán Excel en Drive.")
+        return
+
+    print("")
+    print("============================================================")
+    print("ACTUALIZANDO EXCEL EXISTENTES EN GOOGLE DRIVE")
+    print("============================================================")
+    print("Modo: sobrescribir archivos existentes. No se crearán archivos nuevos.")
+
+    indice_drive = construir_indice_drive_por_estacion(archivos_drive)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        carpeta_tmp = Path(tmpdir)
+
+        resumen = (
+            observado.groupby(["estacion_nombre", "estacion_key", "comid"], dropna=False)
+            .agg(
+                registros=("nivel_m", "count"),
+                fecha_ini=("fecha", "min"),
+                fecha_fin=("fecha", "max"),
+            )
+            .reset_index()
+            .sort_values("estacion_nombre")
+        )
+
+        actualizados = 0
+        omitidos = 0
+
+        for _, row in resumen.iterrows():
+            estacion_nombre = str(row["estacion_nombre"]).strip()
+            estacion_key = normalizar_texto(estacion_nombre)
+
+            # También probamos con variaciones comunes del nombre.
+            posibles_keys = [
+                estacion_key,
+                estacion_key.replace("Á", "A"),
+                estacion_key.replace("MARIA", "MARIA"),
+            ]
+
+            archivo_drive = None
+
+            for key in posibles_keys:
+                if key in indice_drive:
+                    archivo_drive = indice_drive[key]
+                    break
+
+            if archivo_drive is None:
+                print(f"  OMITIDO: {estacion_nombre} no tiene Excel existente en Drive.")
+                omitidos += 1
+                continue
+
+            file_id = archivo_drive.get("id", "")
+            nombre_drive = archivo_drive.get("name", "")
+
+            if not file_id:
+                print(f"  OMITIDO: {estacion_nombre} sin file_id.")
+                omitidos += 1
+                continue
+
+            df_est = observado[observado["estacion_key"] == estacion_key].copy()
+
+            if df_est.empty:
+                print(f"  OMITIDO: {estacion_nombre} sin datos.")
+                omitidos += 1
+                continue
+
+            path_excel = carpeta_tmp / nombre_drive
+
+            # Si el archivo original era .xls, igual generamos .xlsx internamente.
+            # Google Drive acepta actualizar el contenido, pero recomendamos que tus archivos sean .xlsx.
+            if path_excel.suffix.lower() != ".xlsx":
+                path_excel = carpeta_tmp / f"{Path(nombre_drive).stem}.xlsx"
+
+            preparar_excel_estacion(
+                df_est=df_est,
+                estacion_nombre=estacion_nombre,
+                path_salida=path_excel,
+            )
+
+            ok = actualizar_archivo_excel_drive(
+                service=service,
+                file_id=file_id,
+                path_excel=path_excel,
+            )
+
+            if ok:
+                actualizados += 1
+                print(
+                    f"  OK Drive: {nombre_drive} | "
+                    f"filas: {len(df_est):,} | "
+                    f"{df_est['fecha'].min().date()} a {df_est['fecha'].max().date()}"
+                )
+            else:
+                omitidos += 1
+                print(f"  ERROR Drive: {nombre_drive}")
+
+    print("")
+    print("============================================================")
+    print("RESUMEN ACTUALIZACIÓN DRIVE")
+    print("============================================================")
+    print(f"Excel actualizados: {actualizados}")
+    print(f"Excel omitidos/error: {omitidos}")
+
+
+# ============================================================
+# REPORTES EN CONSOLA
+# ============================================================
 
 def imprimir_resumen(df: pd.DataFrame) -> None:
     print("")
@@ -933,6 +1117,53 @@ def imprimir_verificacion_fechas_api(df: pd.DataFrame) -> None:
         )
 
 
+def imprimir_fecha_maxima_final(observado: pd.DataFrame) -> None:
+    print("")
+    print("============================================================")
+    print("FECHA MÁXIMA FINAL POR ESTACIÓN")
+    print("============================================================")
+
+    if observado.empty:
+        print("No hay datos.")
+        return
+
+    resumen_final = (
+        observado.groupby(["estacion_nombre", "comid"], dropna=False)
+        .agg(
+            registros=("nivel_m", "count"),
+            fecha_max=("fecha", "max"),
+        )
+        .reset_index()
+        .sort_values("estacion_nombre")
+    )
+
+    for _, row in resumen_final.iterrows():
+        print(
+            f"{row['estacion_nombre']} | COMID {int(row['comid'])} | "
+            f"fecha máxima: {pd.to_datetime(row['fecha_max']).date()} | "
+            f"registros: {int(row['registros']):,}"
+        )
+
+
+def verificar_timicurillo(observado: pd.DataFrame) -> None:
+    timi = observado[observado["comid"] == 9036459].copy()
+
+    if not timi.empty:
+        print("")
+        print("============================================================")
+        print("VERIFICACIÓN TIMICURILLO")
+        print("============================================================")
+        print(f"Registros Timicurillo: {len(timi):,}")
+        print(f"Fecha inicial: {timi['fecha'].min().date()}")
+        print(f"Fecha final: {timi['fecha'].max().date()}")
+        print(f"Nivel mínimo: {timi['nivel_m'].min():.3f} m")
+        print(f"Nivel promedio: {timi['nivel_m'].mean():.3f} m")
+        print(f"Nivel máximo: {timi['nivel_m'].max():.3f} m")
+    else:
+        print("")
+        print("ADVERTENCIA: Timicurillo sigue sin aparecer en observado_estaciones.")
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -940,11 +1171,16 @@ def imprimir_verificacion_fechas_api(df: pd.DataFrame) -> None:
 def main() -> None:
     print("")
     print("============================================================")
-    print("SCRIPT 02 - ACTUALIZAR OBSERVADO HIDROMET + EXCEL MANUALES")
+    print("SCRIPT 02 - ACTUALIZAR OBSERVADO HIDROMET + EXCEL DRIVE")
     print("============================================================")
     print(f"GPKG_PATH: {GPKG_PATH}")
     print(f"OUT_PARQUET: {OUT_PARQUET}")
     print(f"OUT_CSV: {OUT_CSV}")
+    print(f"OBS_API_START_DATE: {OBS_API_START_DATE}")
+    print(f"OBS_API_END_DATE: {OBS_API_END_DATE}")
+    print(f"OBS_USAR_API: {OBS_USAR_API}")
+    print(f"OBS_USAR_DRIVE_MANUAL: {OBS_USAR_DRIVE_MANUAL}")
+    print(f"OBS_ACTUALIZAR_EXCEL_DRIVE: {OBS_ACTUALIZAR_EXCEL_DRIVE}")
 
     estaciones_gpkg = leer_estaciones_gpkg(GPKG_PATH)
     mapa_comid = construir_mapa_comid(estaciones_gpkg)
@@ -952,10 +1188,26 @@ def main() -> None:
     print("")
     print(f"Estaciones en mapa COMID: {len(mapa_comid)}")
 
+    service = construir_drive_service()
+
+    archivos_drive = []
+
+    if service is not None and OBS_DRIVE_FOLDER_ID:
+        archivos_drive = listar_archivos_drive(service, OBS_DRIVE_FOLDER_ID)
+        print("")
+        print(f"Archivos detectados en Drive: {len(archivos_drive)}")
+    else:
+        print("")
+        print("ADVERTENCIA: No se pudo inicializar Drive o falta OBS_DRIVE_FOLDER_ID.")
+
     partes = []
 
     # 1. Excel/CSV manuales desde Drive
-    obs_drive = leer_observados_manuales_drive(mapa_comid)
+    obs_drive = leer_observados_manuales_drive(
+        mapa_comid=mapa_comid,
+        service=service,
+        archivos_drive=archivos_drive,
+    )
 
     if not obs_drive.empty:
         partes.append(obs_drive)
@@ -973,11 +1225,12 @@ def main() -> None:
         partes.append(obs_api)
 
     # Verificación antes de consolidar
-    imprimir_verificacion_fechas_api(
-        pd.concat([p for p in partes if p is not None and not p.empty], ignore_index=True)
-        if partes
-        else pd.DataFrame()
-    )
+    if partes:
+        previo = pd.concat([p for p in partes if p is not None and not p.empty], ignore_index=True)
+    else:
+        previo = pd.DataFrame()
+
+    imprimir_verificacion_fechas_api(previo)
 
     # 4. Consolidación final
     observado = consolidar_observados(partes)
@@ -987,56 +1240,26 @@ def main() -> None:
     if observado.empty:
         raise RuntimeError("No se generó observado_estaciones porque no hay datos útiles.")
 
+    # 5. Guardar consolidado para AMARU / GitHub
     observado.to_parquet(OUT_PARQUET, index=False)
     observado.to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
 
     print("")
     print("============================================================")
-    print("ARCHIVOS GUARDADOS")
+    print("ARCHIVOS GUARDADOS EN REPOSITORIO")
     print("============================================================")
     print(f"OK: {OUT_PARQUET} | filas: {len(observado):,}")
     print(f"OK: {OUT_CSV} | filas: {len(observado):,}")
 
-    # Verificación rápida de fechas máximas importantes
-    print("")
-    print("============================================================")
-    print("FECHA MÁXIMA FINAL POR ESTACIÓN")
-    print("============================================================")
+    imprimir_fecha_maxima_final(observado)
+    verificar_timicurillo(observado)
 
-    resumen_final = (
-        observado.groupby(["estacion_nombre", "comid"], dropna=False)
-        .agg(
-            registros=("nivel_m", "count"),
-            fecha_max=("fecha", "max"),
-            fuente_ultima=("fuente", "last"),
-        )
-        .reset_index()
-        .sort_values("estacion_nombre")
+    # 6. Actualizar Excel existentes en Google Drive
+    sincronizar_exceles_drive(
+        observado=observado,
+        service=service,
+        archivos_drive=archivos_drive,
     )
-
-    for _, row in resumen_final.iterrows():
-        print(
-            f"{row['estacion_nombre']} | COMID {int(row['comid'])} | "
-            f"fecha máxima: {pd.to_datetime(row['fecha_max']).date()} | "
-            f"registros: {int(row['registros']):,}"
-        )
-
-    timi = observado[observado["comid"] == 9036459].copy()
-
-    if not timi.empty:
-        print("")
-        print("============================================================")
-        print("VERIFICACIÓN TIMICURILLO")
-        print("============================================================")
-        print(f"Registros Timicurillo: {len(timi):,}")
-        print(f"Fecha inicial: {timi['fecha'].min().date()}")
-        print(f"Fecha final: {timi['fecha'].max().date()}")
-        print(f"Nivel mínimo: {timi['nivel_m'].min():.3f} m")
-        print(f"Nivel promedio: {timi['nivel_m'].mean():.3f} m")
-        print(f"Nivel máximo: {timi['nivel_m'].max():.3f} m")
-    else:
-        print("")
-        print("ADVERTENCIA: Timicurillo sigue sin aparecer en observado_estaciones.")
 
 
 if __name__ == "__main__":

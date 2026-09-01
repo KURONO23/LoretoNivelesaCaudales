@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
 import sqlite3
 import tempfile
 import time
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -41,19 +40,30 @@ GPKG_PATH = Path(
 OBS_DRIVE_FOLDER_ID = os.getenv("OBS_DRIVE_FOLDER_ID", "").strip()
 GOOGLE_SERVICE_JSON = os.getenv("GOOGLE_SERVICE_JSON", "").strip()
 
-# Fecha inicial para actualización por API.
-# Se usa 2025-01-01 para tener más de 365 días sin hacer demasiadas llamadas.
+# Periodo de consulta API HidroMet.
+# Se consulta desde 2025-01-01 para asegurar más de 365 días recientes.
 OBS_API_START_DATE = os.getenv("OBS_API_START_DATE", "2025-01-01")
 OBS_API_END_DATE = os.getenv("OBS_API_END_DATE", date.today().strftime("%Y-%m-%d"))
 
-# Si quieres forzar que solo lea Drive y no API:
-# OBS_USAR_API=false
-OBS_USAR_API = os.getenv("OBS_USAR_API", "true").strip().lower() in ["1", "true", "yes", "si", "sí"]
+# Activar o desactivar API HidroMet
+OBS_USAR_API = os.getenv("OBS_USAR_API", "true").strip().lower() in [
+    "1",
+    "true",
+    "yes",
+    "si",
+    "sí",
+]
 
-# Si quieres forzar que lea archivos manuales de Drive:
-OBS_USAR_DRIVE_MANUAL = os.getenv("OBS_USAR_DRIVE_MANUAL", "true").strip().lower() in ["1", "true", "yes", "si", "sí"]
+# Activar o desactivar lectura de Excel/CSV manuales desde Drive
+OBS_USAR_DRIVE_MANUAL = os.getenv("OBS_USAR_DRIVE_MANUAL", "true").strip().lower() in [
+    "1",
+    "true",
+    "yes",
+    "si",
+    "sí",
+]
 
-# Carpetas locales opcionales donde también puede buscar Excel manuales
+# Carpetas locales opcionales donde puede buscar Excel/CSV manuales
 CARPETAS_MANUALES_LOCALES = [
     BASE_DIR / "Data" / "observados_manuales",
     BASE_DIR / "observados_manuales",
@@ -85,8 +95,7 @@ ESTACIONES_API = {
     32: "ANGAMOS",
 }
 
-# Estaciones manuales o estaciones sin ID HidroMet claro.
-# Aquí agregamos Timicurillo explícitamente.
+# Estaciones manuales o estaciones con nombres que pueden variar
 COMID_MANUAL_OVERRIDES = {
     "TIMICURILLO": 9036459,
     "PUERTO ALMENDRA": 9037610,
@@ -97,7 +106,7 @@ COMID_MANUAL_OVERRIDES = {
 
 
 # ============================================================
-# UTILIDADES
+# UTILIDADES GENERALES
 # ============================================================
 
 def normalizar_texto(x: Any) -> str:
@@ -131,16 +140,6 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_fecha_segura(x) -> pd.Timestamp | pd.NaT:
-    if x is None or pd.isna(x):
-        return pd.NaT
-
-    try:
-        return pd.to_datetime(x, errors="coerce")
-    except Exception:
-        return pd.NaT
-
-
 def rango_meses(fecha_ini: str, fecha_fin: str) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
     ini = pd.to_datetime(fecha_ini)
     fin = pd.to_datetime(fecha_fin)
@@ -165,26 +164,40 @@ def reconstruir_fechas_si_necesario(
     fecha_ini: pd.Timestamp,
     fecha_fin: pd.Timestamp,
 ) -> pd.DataFrame:
+    """
+    Corrige fechas defectuosas del API de HidroMet.
+
+    Antes el API devolvía casos como:
+    0001-01-01T00:00:00
+
+    Esta función corrige dos escenarios:
+    1. Todo el bloque viene con fechas malas.
+    2. El bloque viene mixto: algunas fechas buenas y otras malas.
+
+    Si el API devuelve exactamente una fila por día solicitado,
+    se reconstruyen todas las fechas por orden.
+    """
+
     df = df.copy()
 
     if "FECHA" not in df.columns:
         return df
 
     fechas = pd.to_datetime(df["FECHA"], errors="coerce")
-
-    # Caso típico del API: Fecha = 0001-01-01T00:00:00
     fechas_invalidas = fechas.isna() | (fechas.dt.year <= 1901)
 
-    if fechas_invalidas.all():
-        fechas_esperadas = pd.date_range(fecha_ini, fecha_fin, freq="D")
+    fechas_esperadas = pd.date_range(fecha_ini, fecha_fin, freq="D")
 
-        if len(fechas_esperadas) == len(df):
-            df["FECHA"] = fechas_esperadas
-        else:
-            df["FECHA"] = pd.NaT
+    # Caso más seguro:
+    # el API normalmente devuelve una fila por día.
+    # Si la cantidad coincide, reconstruimos por orden de fila.
+    if len(fechas_esperadas) == len(df):
+        df["FECHA"] = fechas_esperadas
+        return df
 
-    else:
-        df["FECHA"] = fechas
+    # Si no coincide, usamos las fechas válidas y anulamos las inválidas.
+    df["FECHA"] = fechas
+    df.loc[fechas_invalidas, "FECHA"] = pd.NaT
 
     return df
 
@@ -197,11 +210,11 @@ def extraer_registros_json(obj: Any) -> list[dict]:
             registros.extend(extraer_registros_json(item))
 
     elif isinstance(obj, dict):
-        # Si el diccionario parece ser un registro tabular
         claves = {normalizar_texto(k) for k in obj.keys()}
 
         if (
             "H_PROM" in claves
+            or "HPROM" in claves
             or "FECHA" in claves
             or "H6" in claves
             or "H10" in claves
@@ -226,6 +239,53 @@ def detectar_columna(df: pd.DataFrame, candidatos: list[str]) -> str | None:
             return cols_norm[cand_norm]
 
     return None
+
+
+def calcular_nivel_api(tmp: pd.DataFrame) -> pd.Series | None:
+    """
+    Calcula nivel_m desde el API.
+
+    Prioridad:
+    1. Usar H_PROM / NIVEL / nivel_m si existe.
+    2. Si no existe, usar promedio de H6, H10, H14, H18.
+    """
+
+    col_hprom = detectar_columna(
+        tmp,
+        [
+            "H_PROM",
+            "HPROM",
+            "H PROM",
+            "H_PROMEDIO",
+            "PROMEDIO",
+            "NIVEL",
+            "NIVEL_M",
+            "nivel_m",
+        ],
+    )
+
+    if col_hprom is not None:
+        return pd.to_numeric(tmp[col_hprom], errors="coerce")
+
+    cols_horarias = []
+
+    for c_hora in ["H6", "H10", "H14", "H18"]:
+        col_detectada = detectar_columna(tmp, [c_hora])
+
+        if col_detectada is not None:
+            cols_horarias.append(col_detectada)
+
+    if len(cols_horarias) == 0:
+        return None
+
+    valores_horarios = tmp[cols_horarias].apply(pd.to_numeric, errors="coerce")
+
+    # Convertir -999 a NaN antes de promediar
+    valores_horarios = valores_horarios.replace(-999, np.nan)
+
+    nivel_m = valores_horarios.mean(axis=1, skipna=True)
+
+    return nivel_m
 
 
 # ============================================================
@@ -321,6 +381,7 @@ def obtener_hidromet_api_estacion(
             registros = extraer_registros_json(data)
 
             if not registros:
+                print(f"  Sin registros API: {estacion_nombre} {ini.date()} a {fin.date()}")
                 continue
 
             tmp = pd.DataFrame(registros)
@@ -328,14 +389,28 @@ def obtener_hidromet_api_estacion(
             tmp = reconstruir_fechas_si_necesario(tmp, ini, fin)
 
             col_fecha = detectar_columna(tmp, ["FECHA", "Fecha", "fecha"])
-            col_hprom = detectar_columna(tmp, ["H_PROM", "HPROM", "H PROM", "H_PROMEDIO", "NIVEL", "nivel_m"])
 
-            if col_fecha is None or col_hprom is None:
+            if col_fecha is None:
+                print(
+                    f"  ADVERTENCIA: API {estacion_nombre} "
+                    f"{ini.date()}-{fin.date()} sin columna FECHA."
+                )
+                print(f"  Columnas disponibles: {list(tmp.columns)}")
+                continue
+
+            nivel_m = calcular_nivel_api(tmp)
+
+            if nivel_m is None:
+                print(
+                    f"  ADVERTENCIA: API {estacion_nombre} "
+                    f"{ini.date()}-{fin.date()} sin H_PROM ni H6/H10/H14/H18."
+                )
+                print(f"  Columnas disponibles: {list(tmp.columns)}")
                 continue
 
             out = pd.DataFrame()
             out["fecha"] = pd.to_datetime(tmp[col_fecha], errors="coerce")
-            out["nivel_m"] = pd.to_numeric(tmp[col_hprom], errors="coerce")
+            out["nivel_m"] = pd.to_numeric(nivel_m, errors="coerce")
             out["id_estacion"] = int(id_estacion)
             out["estacion_nombre"] = estacion_nombre
             out["estacion_key"] = estacion_key
@@ -349,6 +424,12 @@ def obtener_hidromet_api_estacion(
             if not out.empty:
                 partes.append(out)
 
+                print(
+                    f"  API {estacion_nombre}: {ini.date()} a {fin.date()} | "
+                    f"útiles: {len(out):,} | "
+                    f"fecha max: {out['fecha'].max().date()}"
+                )
+
             time.sleep(0.05)
 
         except Exception as e:
@@ -358,6 +439,7 @@ def obtener_hidromet_api_estacion(
         return pd.DataFrame()
 
     df = pd.concat(partes, ignore_index=True)
+
     return df
 
 
@@ -385,10 +467,14 @@ def obtener_hidromet_api_todas(mapa_comid: dict[str, int]) -> pd.DataFrame:
             mapa_comid=mapa_comid,
         )
 
-        print(f"  Registros API útiles: {len(df_est):,}")
-
         if not df_est.empty:
+            print(
+                f"  Registros API útiles: {len(df_est):,} | "
+                f"{df_est['fecha'].min().date()} a {df_est['fecha'].max().date()}"
+            )
             partes.append(df_est)
+        else:
+            print("  Registros API útiles: 0")
 
     if not partes:
         return pd.DataFrame()
@@ -397,7 +483,7 @@ def obtener_hidromet_api_todas(mapa_comid: dict[str, int]) -> pd.DataFrame:
 
 
 # ============================================================
-# GOOGLE DRIVE — LECTURA DE EXCEL MANUALES
+# GOOGLE DRIVE — LECTURA DE EXCEL/CSV MANUALES
 # ============================================================
 
 def construir_drive_service():
@@ -522,35 +608,60 @@ def leer_archivo_observado_manual(path: Path, mapa_comid: dict[str, int]) -> pd.
     df = normalizar_columnas(df)
 
     col_fecha = detectar_columna(df, ["FECHA", "FECHA_HORA", "DATE", "fecha"])
-    col_nivel = detectar_columna(df, ["H_PROM", "HPROM", "H PROM", "NIVEL", "NIVEL_M", "nivel_m"])
+    col_nivel = detectar_columna(
+        df,
+        [
+            "H_PROM",
+            "HPROM",
+            "H PROM",
+            "H_PROMEDIO",
+            "PROMEDIO",
+            "NIVEL",
+            "NIVEL_M",
+            "nivel_m",
+        ],
+    )
     col_id = detectar_columna(df, ["ID_ESTACION", "ID ESTACION", "id_estacion"])
     col_estacion = detectar_columna(df, ["ESTACION_NOMBRE", "ESTACION", "NOMBRE", "estacion_nombre"])
     col_key = detectar_columna(df, ["ESTACION_KEY", "estacion_key"])
 
-    if col_fecha is None or col_nivel is None:
-        print(f"  ADVERTENCIA: {nombre_archivo} no tiene FECHA y H_PROM/NIVEL. Se omite.")
+    # Si un Excel manual tampoco trae H_PROM pero trae H6/H10/H14/H18,
+    # también calculamos el promedio diario.
+    nivel_manual = None
+
+    if col_nivel is not None:
+        nivel_manual = pd.to_numeric(df[col_nivel], errors="coerce")
+    else:
+        nivel_manual = calcular_nivel_api(df)
+
+    if col_fecha is None or nivel_manual is None:
+        print(f"  ADVERTENCIA: {nombre_archivo} no tiene FECHA y H_PROM/NIVEL o H6/H10/H14/H18. Se omite.")
         print(f"  Columnas detectadas: {list(df.columns)}")
         return pd.DataFrame()
 
     if col_estacion is not None:
         serie_nombre = df[col_estacion].dropna().astype(str).str.strip()
+
         if not serie_nombre.empty:
             estacion_nombre = serie_nombre.iloc[0]
         else:
             estacion_nombre = estacion_desde_archivo
+
     elif col_key is not None:
         serie_nombre = df[col_key].dropna().astype(str).str.strip()
+
         if not serie_nombre.empty:
             estacion_nombre = serie_nombre.iloc[0]
         else:
             estacion_nombre = estacion_desde_archivo
+
     else:
         estacion_nombre = estacion_desde_archivo
 
     estacion_key = normalizar_texto(estacion_nombre)
 
-    # Si el nombre del archivo es más confiable que el contenido, usar override.
     archivo_key = normalizar_texto(estacion_desde_archivo)
+
     if archivo_key in COMID_MANUAL_OVERRIDES:
         estacion_key = archivo_key
         estacion_nombre = estacion_desde_archivo
@@ -568,7 +679,7 @@ def leer_archivo_observado_manual(path: Path, mapa_comid: dict[str, int]) -> pd.
 
     out = pd.DataFrame()
     out["fecha"] = pd.to_datetime(df[col_fecha], errors="coerce")
-    out["nivel_m"] = pd.to_numeric(df[col_nivel], errors="coerce")
+    out["nivel_m"] = pd.to_numeric(nivel_manual, errors="coerce")
     out["id_estacion"] = id_estacion
     out["estacion_nombre"] = estacion_nombre
     out["estacion_key"] = estacion_key
@@ -606,7 +717,9 @@ def leer_observados_manuales_locales(mapa_comid: dict[str, int]) -> pd.DataFrame
 
         for path in archivos:
             print(f"Leyendo local: {path}")
+
             df = leer_archivo_observado_manual(path, mapa_comid)
+
             print(f"  Registros útiles: {len(df):,}")
 
             if not df.empty:
@@ -674,10 +787,15 @@ def leer_observados_manuales_drive(mapa_comid: dict[str, int]) -> pd.DataFrame:
                 continue
 
             df = leer_archivo_observado_manual(path_local, mapa_comid)
-            print(f"  Registros útiles: {len(df):,}")
 
             if not df.empty:
+                print(
+                    f"  Registros útiles: {len(df):,} | "
+                    f"{df['fecha'].min().date()} a {df['fecha'].max().date()}"
+                )
                 partes.append(df)
+            else:
+                print("  Registros útiles: 0")
 
     if not partes:
         return pd.DataFrame()
@@ -720,10 +838,9 @@ def consolidar_observados(partes: list[pd.DataFrame]) -> pd.DataFrame:
     df["estacion_nombre"] = df["estacion_nombre"].astype(str).str.strip()
     df["estacion_key"] = df["estacion_nombre"].apply(normalizar_texto)
 
-    # Prioridad:
-    # 1. Excel manual puede aportar histórico completo.
-    # 2. API puede actualizar valores recientes.
-    # Al concatenar manual primero y API después, keep='last' prioriza API en duplicados.
+    # Prioridad de fuente:
+    # Excel manual aporta histórico largo.
+    # API HidroMet debe ganar cuando hay fecha duplicada porque es la actualización reciente.
     df["prioridad_fuente"] = np.where(
         df["fuente"].astype(str).str.contains("HidroMet API", case=False, na=False),
         2,
@@ -787,6 +904,35 @@ def imprimir_resumen(df: pd.DataFrame) -> None:
         )
 
 
+def imprimir_verificacion_fechas_api(df: pd.DataFrame) -> None:
+    print("")
+    print("============================================================")
+    print("VERIFICACIÓN DE FECHAS RECIENTES")
+    print("============================================================")
+
+    if df.empty:
+        print("No hay datos para verificar.")
+        return
+
+    resumen = (
+        df.groupby(["estacion_nombre", "comid", "fuente"], dropna=False)
+        .agg(
+            registros=("nivel_m", "count"),
+            fecha_min=("fecha", "min"),
+            fecha_max=("fecha", "max"),
+        )
+        .reset_index()
+        .sort_values(["estacion_nombre", "fuente"])
+    )
+
+    for _, row in resumen.iterrows():
+        print(
+            f"{row['estacion_nombre']} | {row['fuente']} | "
+            f"Registros: {int(row['registros']):,} | "
+            f"{pd.to_datetime(row['fecha_min']).date()} a {pd.to_datetime(row['fecha_max']).date()}"
+        )
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -826,6 +972,13 @@ def main() -> None:
     if not obs_api.empty:
         partes.append(obs_api)
 
+    # Verificación antes de consolidar
+    imprimir_verificacion_fechas_api(
+        pd.concat([p for p in partes if p is not None and not p.empty], ignore_index=True)
+        if partes
+        else pd.DataFrame()
+    )
+
     # 4. Consolidación final
     observado = consolidar_observados(partes)
 
@@ -843,6 +996,30 @@ def main() -> None:
     print("============================================================")
     print(f"OK: {OUT_PARQUET} | filas: {len(observado):,}")
     print(f"OK: {OUT_CSV} | filas: {len(observado):,}")
+
+    # Verificación rápida de fechas máximas importantes
+    print("")
+    print("============================================================")
+    print("FECHA MÁXIMA FINAL POR ESTACIÓN")
+    print("============================================================")
+
+    resumen_final = (
+        observado.groupby(["estacion_nombre", "comid"], dropna=False)
+        .agg(
+            registros=("nivel_m", "count"),
+            fecha_max=("fecha", "max"),
+            fuente_ultima=("fuente", "last"),
+        )
+        .reset_index()
+        .sort_values("estacion_nombre")
+    )
+
+    for _, row in resumen_final.iterrows():
+        print(
+            f"{row['estacion_nombre']} | COMID {int(row['comid'])} | "
+            f"fecha máxima: {pd.to_datetime(row['fecha_max']).date()} | "
+            f"registros: {int(row['registros']):,}"
+        )
 
     timi = observado[observado["comid"] == 9036459].copy()
 

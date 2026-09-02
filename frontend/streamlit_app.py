@@ -859,6 +859,9 @@ def graficar_pronostico_actual(
 
     fig = go.Figure()
 
+    # ------------------------------------------------------------
+    # 1. Observado reciente
+    # ------------------------------------------------------------
     if mostrar_obs and not obs_plot.empty:
         fig.add_trace(
             go.Scatter(
@@ -871,6 +874,9 @@ def graficar_pronostico_actual(
             )
         )
 
+    # ------------------------------------------------------------
+    # 2. Banda ajustada min-max
+    # ------------------------------------------------------------
     if (
         not pron_plot.empty
         and "nivel_min_ajustado_m" in pron_plot.columns
@@ -901,6 +907,70 @@ def graficar_pronostico_actual(
             )
         )
 
+    # ------------------------------------------------------------
+    # 3. Línea punteada de continuidad observado-pronóstico
+    # ------------------------------------------------------------
+    # Esta línea no cambia los datos. Solo une visualmente el último
+    # observado con el primer pronóstico ajustado.
+    col_pron_union = None
+
+    for c in [
+        "nivel_prom_ajustado_m",
+        "nivel_eta_eqm_ajustado_m",
+        "nivel_eta_scal_ajustado_m",
+        "nivel_gfs_ajustado_m",
+        "nivel_wrf_ajustado_m",
+    ]:
+        if c in pron_plot.columns:
+            col_pron_union = c
+            break
+
+    if (
+        mostrar_obs
+        and obs_plot is not None
+        and pron_plot is not None
+        and not obs_plot.empty
+        and not pron_plot.empty
+        and "fecha" in obs_plot.columns
+        and "fecha" in pron_plot.columns
+        and "nivel_m" in obs_plot.columns
+        and col_pron_union is not None
+    ):
+        obs_tmp = obs_plot.dropna(subset=["fecha", "nivel_m"]).copy()
+        pron_tmp = pron_plot.dropna(subset=["fecha", col_pron_union]).copy()
+
+        if not obs_tmp.empty and not pron_tmp.empty:
+            obs_tmp = obs_tmp.sort_values("fecha")
+            pron_tmp = pron_tmp.sort_values("fecha")
+
+            ultimo_obs = obs_tmp.iloc[-1]
+            primer_pron = pron_tmp.iloc[0]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=[
+                        ultimo_obs["fecha"],
+                        primer_pron["fecha"],
+                    ],
+                    y=[
+                        ultimo_obs["nivel_m"],
+                        primer_pron[col_pron_union],
+                    ],
+                    mode="lines",
+                    name="Continuidad observado-pronóstico",
+                    line=dict(
+                        width=2,
+                        color="black",
+                        dash="dot",
+                    ),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
+    # ------------------------------------------------------------
+    # 4. Modelos individuales ajustados
+    # ------------------------------------------------------------
     modelos_ajustados = [
         ("nivel_eta_eqm_ajustado_m", "ETA_eqm ajustado", "dot"),
         ("nivel_eta_scal_ajustado_m", "ETA_scal ajustado", "dash"),
@@ -922,6 +992,9 @@ def graficar_pronostico_actual(
                 )
             )
 
+    # ------------------------------------------------------------
+    # 5. Media ajustada de modelos
+    # ------------------------------------------------------------
     if not pron_plot.empty and "nivel_prom_ajustado_m" in pron_plot.columns:
         fig.add_trace(
             go.Scatter(
@@ -934,6 +1007,9 @@ def graficar_pronostico_actual(
             )
         )
 
+    # ------------------------------------------------------------
+    # 6. Línea vertical de referencia
+    # ------------------------------------------------------------
     fecha_referencia = None
     texto_referencia = "Último observado"
 
@@ -979,6 +1055,7 @@ def graficar_pronostico_actual(
 
     st.caption(
         "La línea negra representa el nivel observado reciente. "
+        "La línea punteada negra une visualmente el último observado con el primer pronóstico ajustado. "
         "La línea azul representa la media ajustada de los modelos. "
         "La banda azul clara representa el rango ajustado min–max entre modelos. "
         "Los modelos individuales ajustados pueden activarse desde la leyenda."

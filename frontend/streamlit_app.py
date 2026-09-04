@@ -50,140 +50,66 @@ MAX_DIAS_OBS_GRAFICO = 7
 st.markdown(
     """
     <style>
-    /* ==========================================================
-       AJUSTE VISUAL GENERAL
-       Objetivo: visor compacto, sin scroll innecesario y con
-       cabecera institucional limpia.
-       ========================================================== */
-
+    /* Reducir espacios verticales para evitar scroll innecesario */
     .block-container {
-        padding-top: 0.35rem !important;
-        padding-bottom: 0.10rem !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-        max-width: 100% !important;
-    }
-
-    header[data-testid="stHeader"] {
-        height: 0rem;
-    }
-
-    [data-testid="stToolbar"] {
-        right: 1rem;
+        padding-top: 0.8rem;
+        padding-bottom: 0.2rem;
     }
 
     .main-title {
-        font-size: 2.75rem;
+        font-size: 3.2rem;
         font-weight: 900;
         color: #0f2f6b;
-        margin: 0;
-        line-height: 0.90;
+        margin-bottom: 0.10rem;
+        line-height: 0.95;
         letter-spacing: 1px;
     }
 
     .subtitle {
-        font-size: 1.02rem;
+        font-size: 1.25rem;
         color: #14532d;
-        margin: 0.20rem 0 0 0;
+        margin-bottom: 0rem;
         font-weight: 700;
-        line-height: 1.15;
+        line-height: 1.25;
     }
 
     .header-box {
         display: flex;
         align-items: center;
-        gap: 18px;
-        margin-top: 0.10rem;
-        margin-bottom: 0.55rem;
-        min-height: 90px;
-    }
-
-    .logo-box {
-        width: 96px;
-        min-width: 96px;
-        height: 96px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: visible !important;
-        padding: 4px;
+        gap: 22px;
+        margin-top: 0.2rem;
+        margin-bottom: 0.6rem;
     }
 
     .header-logo {
-        width: 100%;
-        height: 100%;
-        object-fit: contain !important;
-        display: block;
+        width: 125px;
+        min-width: 125px;
     }
 
     .header-text {
         display: flex;
         flex-direction: column;
         justify-content: center;
-        min-width: 0;
     }
 
     .section-title {
-        font-size: 1.02rem;
-        font-weight: 800;
+        font-size: 1.15rem;
+        font-weight: 700;
         color: #0f172a;
-        margin-top: 0.15rem;
-        margin-bottom: 0.30rem;
+        margin-top: 0.25rem;
+        margin-bottom: 0.35rem;
     }
 
     .stMetric {
         background-color: #ffffff;
-        border: 1px solid #dbe4ef;
+        border: 1px solid #e2e8f0;
         border-radius: 14px;
-        padding: 10px 12px;
+        padding: 14px;
         box-shadow: 0px 1px 3px rgba(15, 23, 42, 0.08);
-    }
-
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.78rem;
     }
 
     div[data-testid="stMetricValue"] {
-        font-size: 1.22rem;
-    }
-
-    div[data-testid="stMetricDelta"] {
-        font-size: 0.78rem;
-    }
-
-    .stCaption, div[data-testid="stCaptionContainer"] {
-        font-size: 0.78rem !important;
-        color: #64748b !important;
-    }
-
-    section[data-testid="stSidebar"] {
-        background-color: #f8fafc;
-    }
-
-    section[data-testid="stSidebar"] .block-container {
-        padding-top: 1.4rem !important;
-    }
-
-    iframe[title="streamlit_folium.st_folium"] {
-        border-radius: 14px;
-        border: 1px solid #dbe4ef;
-        box-shadow: 0px 1px 3px rgba(15, 23, 42, 0.08);
-    }
-
-    @media (max-width: 900px) {
-        .main-title {
-            font-size: 2.2rem;
-        }
-
-        .subtitle {
-            font-size: 0.92rem;
-        }
-
-        .logo-box {
-            width: 82px;
-            min-width: 82px;
-            height: 82px;
-        }
+        font-size: 1.35rem;
     }
     </style>
     """,
@@ -1123,7 +1049,7 @@ def graficar_pronostico_actual(
         )
 
     fig.update_layout(
-        height=390,
+        height=420,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
@@ -1134,9 +1060,11 @@ def graficar_pronostico_actual(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "Obs. reciente: negro | Continuidad visual: punteado negro | "
-        "Media ajustada: azul | Rango min–max: banda azul clara. "
-        "Modelos individuales disponibles en la leyenda."
+        "La línea negra representa el nivel observado reciente. "
+        "La línea punteada negra une visualmente el último observado con el primer pronóstico ajustado. "
+        "La línea azul representa la media ajustada de los modelos. "
+        "La banda azul clara representa el rango ajustado min–max entre modelos. "
+        "Los modelos individuales ajustados pueden activarse desde la leyenda."
     )
 
 
@@ -1315,7 +1243,7 @@ def graficar_validacion_historica(
     )
 
     fig.update_layout(
-        height=390,
+        height=420,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
@@ -1358,7 +1286,7 @@ if LOGO_FILE.exists():
     st.markdown(
         f"""
         <div class="header-box">
-            <div class="logo-box">
+            <div>
                 <img src="data:image/png;base64,{logo_base64}" class="header-logo">
             </div>
             <div class="header-text">
@@ -1564,8 +1492,8 @@ with col_mapa:
 
     mapa_evento = st_folium(
         mapa,
-        width=500,
-        height=520,
+        width=520,
+        height=560,
         key="mapa_estaciones_click",
         returned_objects=["last_object_clicked_tooltip"],
     )

@@ -1714,12 +1714,70 @@ with col_panel:
             tendencia_mostrar = f"{tendencia_txt}  ↓ {formato_num(abs(tendencia_val))} m"
         else:
             tendencia_mostrar = f"{tendencia_txt}  → {formato_num(tendencia_val)} m"
-        
-        k3.metric(
-            "Tendencia esperada",
-            tendencia_mostrar,
-        )
 
+
+        
+      tendencia_txt = clasificar_tendencia(tendencia_val)
+
+        if tendencia_val is None or pd.isna(tendencia_val):
+            tendencia_html = f"""
+            <div class="stMetric">
+                <div style="font-size:0.78rem;color:#334155;font-weight:600;">
+                    Tendencia esperada
+                </div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;margin-top:4px;">
+                    {tendencia_txt}
+                </div>
+            </div>
+            """
+        elif tendencia_val > 0:
+            tendencia_html = f"""
+            <div class="stMetric">
+                <div style="font-size:0.78rem;color:#334155;font-weight:600;">
+                    Tendencia esperada
+                </div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;margin-top:4px;">
+                    {tendencia_txt}
+                    <span style="color:#16a34a;font-size:0.78rem;font-weight:700;margin-left:8px;">
+                        ↑ {formato_num(tendencia_val)} m
+                    </span>
+                </div>
+            </div>
+            """
+        elif tendencia_val < 0:
+            tendencia_html = f"""
+            <div class="stMetric">
+                <div style="font-size:0.78rem;color:#334155;font-weight:600;">
+                    Tendencia esperada
+                </div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;margin-top:4px;">
+                    {tendencia_txt}
+                    <span style="color:#dc2626;font-size:0.78rem;font-weight:700;margin-left:8px;">
+                        ↓ {formato_num(abs(tendencia_val))} m
+                    </span>
+                </div>
+            </div>
+            """
+        else:
+            tendencia_html = f"""
+            <div class="stMetric">
+                <div style="font-size:0.78rem;color:#334155;font-weight:600;">
+                    Tendencia esperada
+                </div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;margin-top:4px;">
+                    {tendencia_txt}
+                    <span style="color:#2563eb;font-size:0.78rem;font-weight:700;margin-left:8px;">
+                        → {formato_num(tendencia_val)} m
+                    </span>
+                </div>
+            </div>
+            """
+        
+        with k3:
+            st.markdown(tendencia_html, unsafe_allow_html=True)
+
+
+        
         graficar_pronostico_actual(
             pron_est=pron_est,
             obs_est=obs_est,

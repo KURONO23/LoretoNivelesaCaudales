@@ -51,15 +51,15 @@ st.markdown(
     """
     <style>
     /* ============================================================
-       AJUSTES GENERALES DEL VISOR AMARU
-       Estilo institucional compacto tipo dashboard técnico
+       AMARU - Ajuste visual uniforme y compacto
+       Cambio seguro: solo presentación, sin tocar datos ni lógica
     ============================================================ */
 
     .block-container {
-        padding-top: 1.0rem !important;
-        padding-bottom: 0.5rem !important;
-        padding-left: 1.4rem !important;
-        padding-right: 1.4rem !important;
+        padding-top: 0.85rem !important;
+        padding-bottom: 0.25rem !important;
+        padding-left: 1.15rem !important;
+        padding-right: 1.15rem !important;
         max-width: 100% !important;
     }
 
@@ -69,7 +69,7 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] > div {
-        padding-top: 1.2rem;
+        padding-top: 1.05rem;
     }
 
     /* ============================================================
@@ -79,18 +79,20 @@ st.markdown(
     .header-box {
         display: flex;
         align-items: center;
-        gap: 18px;
+        gap: 16px;
         margin-top: 1.8rem;
-        margin-bottom: 0.8rem;
-        padding: 0.15rem 0 0.25rem 0;
+        margin-bottom: 0.85rem;
+        padding: 0;
     }
 
     .header-logo {
-        width: 105px;
-        min-width: 105px;
-        height: auto !important;
+        width: 104px;
+        min-width: 104px;
+        height: 104px !important;
         object-fit: contain !important;
         display: block;
+        padding: 6px;
+        box-sizing: border-box;
     }
 
     .header-text {
@@ -101,20 +103,20 @@ st.markdown(
     }
 
     .main-title {
-        font-size: 2.35rem;
+        font-size: 2.38rem;
         font-weight: 900;
         color: #0f2f6b;
-        margin-bottom: 0.05rem;
-        line-height: 0.95;
-        letter-spacing: 0.6px;
+        margin: 0;
+        line-height: 1.0;
+        letter-spacing: 0.45px;
     }
 
     .subtitle {
-        font-size: 1.02rem;
+        font-size: 1.00rem;
         color: #14532d;
-        margin-bottom: 0rem;
+        margin: 0.12rem 0 0 0;
         font-weight: 700;
-        line-height: 1.15;
+        line-height: 1.18;
     }
 
     /* ============================================================
@@ -122,12 +124,13 @@ st.markdown(
     ============================================================ */
 
     .section-title {
-        font-size: 1.03rem;
+        font-size: 1.02rem;
         font-weight: 800;
         color: #0f172a;
-        margin-top: 0.25rem;
-        margin-bottom: 0.35rem;
-        letter-spacing: 0.1px;
+        margin-top: 0.20rem;
+        margin-bottom: 0.42rem;
+        line-height: 1.20;
+        letter-spacing: 0.08px;
     }
 
     /* ============================================================
@@ -139,6 +142,7 @@ st.markdown(
         border: 1px solid #dbe4ef;
         border-radius: 10px;
         padding: 10px 12px;
+        min-height: 76px;
         box-shadow: 0px 1px 3px rgba(15, 23, 42, 0.08);
     }
 
@@ -146,20 +150,23 @@ st.markdown(
         font-size: 0.78rem;
         color: #334155;
         font-weight: 600;
+        line-height: 1.15;
     }
 
     div[data-testid="stMetricValue"] {
         font-size: 1.15rem;
-        font-weight: 700;
+        font-weight: 800;
         color: #0f172a;
+        line-height: 1.20;
     }
 
     div[data-testid="stMetricDelta"] {
         font-size: 0.78rem;
+        line-height: 1.10;
     }
 
     /* ============================================================
-       SIDEBAR
+       SIDEBAR: solo uniformidad, no se cambia estructura
     ============================================================ */
 
     section[data-testid="stSidebar"] h1,
@@ -177,12 +184,12 @@ st.markdown(
 
     section[data-testid="stSidebar"] .stRadio,
     section[data-testid="stSidebar"] .stSelectbox {
-        margin-bottom: 0.45rem;
+        margin-bottom: 0.42rem;
     }
 
     section[data-testid="stSidebar"] hr {
-        margin-top: 0.8rem;
-        margin-bottom: 0.8rem;
+        margin-top: 0.70rem;
+        margin-bottom: 0.70rem;
         border-color: #cbd5e1;
     }
 
@@ -192,36 +199,32 @@ st.markdown(
     }
 
     /* ============================================================
-       MAPA Y GRÁFICOS
+       MAPA, GRÁFICOS Y ESPACIADO
     ============================================================ */
 
     iframe {
-        border-radius: 10px !important;
+        border-radius: 9px !important;
     }
 
     div[data-testid="stPlotlyChart"] {
-        border-radius: 10px;
+        border-radius: 9px;
     }
 
-    /* Captions más compactos */
     div[data-testid="stCaptionContainer"] {
         font-size: 0.78rem;
         color: #64748b;
-        line-height: 1.25;
+        line-height: 1.22;
     }
 
-    /* Reducir espacios verticales entre elementos */
     div[data-testid="stVerticalBlock"] {
         gap: 0.45rem;
     }
 
-    /* Mejor ajuste de columnas */
     div[data-testid="column"] {
-        padding-left: 0.25rem;
-        padding-right: 0.25rem;
+        padding-left: 0.30rem;
+        padding-right: 0.30rem;
     }
 
-    /* Oculta un poco el exceso visual de Streamlit */
     #MainMenu {
         visibility: hidden;
     }
@@ -233,7 +236,6 @@ st.markdown(
     header {
         visibility: visible;
     }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -1172,12 +1174,18 @@ def graficar_pronostico_actual(
         )
 
     fig.update_layout(
-        height=420,
-        margin=dict(l=20, r=20, t=30, b=20),
+        height=430,
+        margin=dict(l=20, r=16, t=24, b=18),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
         legend_title="Serie",
         hovermode="x unified",
+        font=dict(size=11),
+        legend=dict(
+            font=dict(size=10),
+            title_font=dict(size=10),
+            itemwidth=30,
+        ),
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -1366,12 +1374,18 @@ def graficar_validacion_historica(
     )
 
     fig.update_layout(
-        height=420,
-        margin=dict(l=20, r=20, t=30, b=20),
+        height=430,
+        margin=dict(l=20, r=16, t=24, b=18),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
         legend_title="Serie",
         hovermode="x unified",
+        font=dict(size=11),
+        legend=dict(
+            font=dict(size=10),
+            title_font=dict(size=10),
+            itemwidth=30,
+        ),
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -1616,7 +1630,7 @@ with col_mapa:
     mapa_evento = st_folium(
         mapa,
         width=520,
-        height=560,
+        height=540,
         key="mapa_estaciones_click",
         returned_objects=["last_object_clicked_tooltip"],
     )

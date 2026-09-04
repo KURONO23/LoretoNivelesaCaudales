@@ -3,7 +3,10 @@ import base64
 import html
 import re
 import sqlite3
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 import folium
 import numpy as np
 import pandas as pd
@@ -283,21 +286,62 @@ def formato_num(x, nd: int = 2) -> str:
 
 
 def obtener_sello_agua_base64() -> str | None:
+    """
+    Lee el sello de agua y lo convierte en PNG con transparencia real.
+
+    Esto evita que el sello aparezca como una caja rectangular dentro
+    del gráfico cuando el archivo original es JPG con fondo gris/blanco.
+    """
     for path in SELLO_FILES:
-        if path.exists():
-            try:
-                ext = path.suffix.lower()
+        if not path.exists():
+            continue
 
-                if ext in [".jpg", ".jpeg"]:
-                    mime = "image/jpeg"
+        try:
+            img = Image.open(path).convert("RGBA")
+
+            # Reducir tamaño para que el gráfico no cargue demasiado pesado.
+            max_w = 900
+            if img.width > max_w:
+                ratio = max_w / img.width
+                new_size = (int(img.width * ratio), int(img.height * ratio))
+                img = img.resize(new_size)
+
+            pixels = img.getdata()
+            nuevos = []
+
+            for r, g, b, a in pixels:
+                # Eliminar fondos muy claros o grises claros.
+                # Esto quita el rectángulo visible del JPG.
+                if r > 185 and g > 185 and b > 185:
+                    nuevos.append((255, 255, 255, 0))
+                    continue
+
+                gris = int((r + g + b) / 3)
+
+                # Transparencia tipo sello de agua.
+                # No usamos opacity de Plotly porque aquí ya controlamos
+                # el alpha píxel por píxel.
+                if gris > 170:
+                    alpha = 0
+                elif gris > 135:
+                    alpha = 18
+                elif gris > 95:
+                    alpha = 24
                 else:
-                    mime = "image/png"
+                    alpha = 30
 
-                img_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
-                return f"data:{mime};base64,{img_b64}"
+                nuevos.append((95, 95, 95, alpha))
 
-            except Exception:
-                return None
+            img.putdata(nuevos)
+
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            img_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+            return f"data:image/png;base64,{img_b64}"
+
+        except Exception:
+            return None
 
     return None
 
@@ -1063,11 +1107,11 @@ def graficar_pronostico_actual(
                 yref="paper",
                 x=0.50,
                 y=0.52,
-                sizex=0.42,
-                sizey=0.42,
+                sizex=0.50,
+                sizey=0.50,
                 xanchor="center",
                 yanchor="middle",
-                opacity=0.60,
+                opacity=1.0,
                 layer="below",
             )
         )

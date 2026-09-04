@@ -210,11 +210,22 @@ st.markdown(
     ============================================================ */
 
     iframe {
-        border-radius: 9px !important;
+        border-radius: 12px !important;
+        border: 2.5px solid #cfd9e6 !important;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10) !important;
+        background: #ffffff !important;
     }
 
     div[data-testid="stPlotlyChart"] {
-        border-radius: 9px;
+        border: 2.5px solid #cfd9e6;
+        border-radius: 12px;
+        padding: 8px 10px 4px 10px;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10);
+        background: #ffffff;
+    }
+
+    div[data-testid="stPlotlyChart"] > div {
+        border-radius: 10px;
     }
 
     div[data-testid="stCaptionContainer"] {

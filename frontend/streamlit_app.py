@@ -50,67 +50,190 @@ MAX_DIAS_OBS_GRAFICO = 7
 st.markdown(
     """
     <style>
-    /* Reducir espacios verticales para evitar scroll innecesario */
+    /* ============================================================
+       AJUSTES GENERALES DEL VISOR AMARU
+       Estilo institucional compacto tipo dashboard técnico
+    ============================================================ */
+
     .block-container {
-        padding-top: 0.8rem;
-        padding-bottom: 0.2rem;
+        padding-top: 1.0rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 1.4rem !important;
+        padding-right: 1.4rem !important;
+        max-width: 100% !important;
     }
 
-    .main-title {
-        font-size: 3.2rem;
-        font-weight: 900;
-        color: #0f2f6b;
-        margin-bottom: 0.10rem;
-        line-height: 0.95;
-        letter-spacing: 1px;
+    section[data-testid="stSidebar"] {
+        background: #f3f7fb;
+        border-right: 1px solid #dbe4ef;
     }
 
-    .subtitle {
-        font-size: 1.25rem;
-        color: #14532d;
-        margin-bottom: 0rem;
-        font-weight: 700;
-        line-height: 1.25;
+    section[data-testid="stSidebar"] > div {
+        padding-top: 1.2rem;
     }
+
+    /* ============================================================
+       CABECERA
+    ============================================================ */
 
     .header-box {
         display: flex;
         align-items: center;
-        gap: 22px;
-        margin-top: 0.2rem;
-        margin-bottom: 0.6rem;
+        gap: 18px;
+        margin-top: 0.1rem;
+        margin-bottom: 0.8rem;
+        padding: 0.15rem 0 0.25rem 0;
     }
 
     .header-logo {
-        width: 125px;
-        min-width: 125px;
+        width: 105px;
+        min-width: 105px;
+        height: auto !important;
+        object-fit: contain !important;
+        display: block;
     }
 
     .header-text {
         display: flex;
         flex-direction: column;
         justify-content: center;
+        min-width: 0;
     }
 
-    .section-title {
-        font-size: 1.15rem;
+    .main-title {
+        font-size: 2.35rem;
+        font-weight: 900;
+        color: #0f2f6b;
+        margin-bottom: 0.05rem;
+        line-height: 0.95;
+        letter-spacing: 0.6px;
+    }
+
+    .subtitle {
+        font-size: 1.02rem;
+        color: #14532d;
+        margin-bottom: 0rem;
         font-weight: 700;
+        line-height: 1.15;
+    }
+
+    /* ============================================================
+       TÍTULOS DE SECCIÓN
+    ============================================================ */
+
+    .section-title {
+        font-size: 1.03rem;
+        font-weight: 800;
         color: #0f172a;
         margin-top: 0.25rem;
         margin-bottom: 0.35rem;
+        letter-spacing: 0.1px;
     }
+
+    /* ============================================================
+       MÉTRICAS / KPIs
+    ============================================================ */
 
     .stMetric {
         background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 14px;
+        border: 1px solid #dbe4ef;
+        border-radius: 10px;
+        padding: 10px 12px;
         box-shadow: 0px 1px 3px rgba(15, 23, 42, 0.08);
     }
 
-    div[data-testid="stMetricValue"] {
-        font-size: 1.35rem;
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.78rem;
+        color: #334155;
+        font-weight: 600;
     }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.78rem;
+    }
+
+    /* ============================================================
+       SIDEBAR
+    ============================================================ */
+
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {
+        color: #0f2f6b;
+        font-weight: 800;
+    }
+
+    section[data-testid="stSidebar"] label {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #334155;
+    }
+
+    section[data-testid="stSidebar"] .stRadio,
+    section[data-testid="stSidebar"] .stSelectbox {
+        margin-bottom: 0.45rem;
+    }
+
+    section[data-testid="stSidebar"] hr {
+        margin-top: 0.8rem;
+        margin-bottom: 0.8rem;
+        border-color: #cbd5e1;
+    }
+
+    section[data-testid="stSidebar"] p {
+        font-size: 0.80rem;
+        line-height: 1.25;
+    }
+
+    /* ============================================================
+       MAPA Y GRÁFICOS
+    ============================================================ */
+
+    iframe {
+        border-radius: 10px !important;
+    }
+
+    div[data-testid="stPlotlyChart"] {
+        border-radius: 10px;
+    }
+
+    /* Captions más compactos */
+    div[data-testid="stCaptionContainer"] {
+        font-size: 0.78rem;
+        color: #64748b;
+        line-height: 1.25;
+    }
+
+    /* Reducir espacios verticales entre elementos */
+    div[data-testid="stVerticalBlock"] {
+        gap: 0.45rem;
+    }
+
+    /* Mejor ajuste de columnas */
+    div[data-testid="column"] {
+        padding-left: 0.25rem;
+        padding-right: 0.25rem;
+    }
+
+    /* Oculta un poco el exceso visual de Streamlit */
+    #MainMenu {
+        visibility: hidden;
+    }
+
+    footer {
+        visibility: hidden;
+    }
+
+    header {
+        visibility: visible;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,

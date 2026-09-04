@@ -36,7 +36,11 @@ METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
-SELLO_AGUA_FILE = BASE_DIR / "frontend" / "assets" / "sello_agua_amaru.png"
+SELLO_AGUA_FILES = [
+    BASE_DIR / "frontend" / "assets" / "sello_agua_amaru.png",
+    BASE_DIR / "frontend" / "assets" / "sello_agua_amaru.jpg",
+    BASE_DIR / "frontend" / "assets" / "sello_agua_amaru.jpeg",
+]
 
 DIAS_OBS_GRAFICO = 5
 MAX_DIAS_OBS_GRAFICO = 7
@@ -333,7 +337,19 @@ def formato_num(x, nd: int = 2) -> str:
         return "Sin dato"
 
 
-def imagen_a_base64(path: Path) -> str:
+def obtener_sello_agua() -> tuple[Path | None, str]:
+    """Devuelve la ruta y el MIME del sello de agua si existe en assets."""
+    for path in SELLO_AGUA_FILES:
+        if path.exists():
+            suf = path.suffix.lower()
+            if suf in [".jpg", ".jpeg"]:
+                return path, "image/jpeg"
+            return path, "image/png"
+
+    return None, "image/png"
+
+
+def imagen_a_base64(path: Path | None) -> str:
     if path is None or not Path(path).exists():
         return ""
 
@@ -352,26 +368,20 @@ def render_kpi_card(
     watermark_html = ""
 
     if watermark_b64:
-        watermark_html = f"""
-            <img
-                src="data:image/png;base64,{watermark_b64}"
-                class="amaru-kpi-watermark"
-            >
-        """
+        watermark_html = (
+            f'<img src="data:{SELLO_AGUA_MIME};base64,{watermark_b64}" '
+            f'class="amaru-kpi-watermark">'
+        )
 
-    st.markdown(
-        f"""
-        <div class="amaru-kpi-card">
-            {watermark_html}
-            <div class="amaru-kpi-label">{html.escape(str(label))}</div>
-            <div class="amaru-kpi-value">
-                {html.escape(str(value))}
-                {extra_html}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Importante: el HTML va sin sangría inicial para que Streamlit no lo
+    # interprete como bloque de código.
+    html_card = f"""<div class="amaru-kpi-card">
+{watermark_html}
+<div class="amaru-kpi-label">{html.escape(str(label))}</div>
+<div class="amaru-kpi-value">{html.escape(str(value))}{extra_html}</div>
+</div>"""
+
+    st.markdown(html_card, unsafe_allow_html=True)
 
 
 def clasificar_tendencia(delta) -> str:
@@ -1508,6 +1518,7 @@ historico = cargar_historico_pronosticos()
 if "nivel_m" in obs.columns:
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
 
+SELLO_AGUA_FILE, SELLO_AGUA_MIME = obtener_sello_agua()
 SELLO_AGUA_BASE64 = imagen_a_base64(SELLO_AGUA_FILE)
 
 

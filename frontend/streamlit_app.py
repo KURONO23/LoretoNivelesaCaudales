@@ -80,7 +80,7 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 18px;
-        margin-top: 1.2rem;
+        margin-top: 1.8rem;
         margin-bottom: 0.8rem;
         padding: 0.15rem 0 0.25rem 0;
     }

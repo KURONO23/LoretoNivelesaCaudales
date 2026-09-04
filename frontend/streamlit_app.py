@@ -982,7 +982,7 @@ def graficar_pronostico_actual(
         st.caption(mensaje_obs)
 
     st.markdown(
-        '<div class="section-title">Nivel observado + pronóstico ajustado de 7 días</div>',
+        '<div class="section-title">Nivel observado y pronóstico ajustado a 7 días</div>',
         unsafe_allow_html=True,
     )
 
@@ -1189,11 +1189,8 @@ def graficar_pronostico_actual(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "La línea negra representa el nivel observado reciente. "
-        "La línea punteada negra une visualmente el último observado con el primer pronóstico ajustado. "
-        "La línea azul representa la media ajustada de los modelos. "
-        "La banda azul clara representa el rango ajustado min–max entre modelos. "
-        "Los modelos individuales ajustados pueden activarse desde la leyenda."
+        "Observado reciente en negro. Pronóstico ajustado en azul. "
+        "Línea punteada: continuidad observado-pronóstico. Banda azul: rango min–max entre modelos."
     )
 
 
@@ -1389,10 +1386,8 @@ def graficar_validacion_historica(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "La línea negra representa el nivel observado real. "
-        "La línea azul representa la media ajustada del pronóstico emitido. "
-        "La banda azul clara representa el rango ajustado min–max entre modelos. "
-        "Los modelos individuales ajustados pueden activarse desde la leyenda."
+        "Observado real en negro. Pronóstico histórico ajustado en azul. "
+        "Banda azul: rango min–max entre modelos."
     )
 
 
@@ -1616,7 +1611,7 @@ col_mapa, col_panel = st.columns([0.95, 2.05], gap="large")
 # ============================================================
 
 with col_mapa:
-    st.markdown('<div class="section-title">Mapa de estaciones</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Mapa operativo de estaciones – Loreto</div>', unsafe_allow_html=True)
 
     mapa = crear_mapa_estaciones(
         estaciones=estaciones,
@@ -1666,7 +1661,12 @@ with col_mapa:
 
 with col_panel:
     st.markdown(
-        f'<div class="section-title">Estación: {estacion_sel}</div>',
+        f'''
+        <div class="section-title">
+            Pronóstico hidrológico operativo – Loreto
+            <span style="font-weight:700; color:#475569;"> | Estación: {html.escape(str(estacion_sel))}</span>
+        </div>
+        ''',
         unsafe_allow_html=True,
     )
 

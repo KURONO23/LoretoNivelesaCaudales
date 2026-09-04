@@ -1704,10 +1704,20 @@ with col_panel:
             f"{formato_num(nivel_fin)} m",
         )
 
+        tendencia_txt = clasificar_tendencia(tendencia_val)
+
+        if tendencia_val is None or pd.isna(tendencia_val):
+            tendencia_mostrar = tendencia_txt
+        elif tendencia_val > 0:
+            tendencia_mostrar = f"{tendencia_txt}  ↑ {formato_num(tendencia_val)} m"
+        elif tendencia_val < 0:
+            tendencia_mostrar = f"{tendencia_txt}  ↓ {formato_num(abs(tendencia_val))} m"
+        else:
+            tendencia_mostrar = f"{tendencia_txt}  → {formato_num(tendencia_val)} m"
+        
         k3.metric(
             "Tendencia esperada",
-            clasificar_tendencia(tendencia_val),
-            delta=f"{formato_num(tendencia_val)} m" if tendencia_val is not None else None,
+            tendencia_mostrar,
         )
 
         graficar_pronostico_actual(

@@ -50,6 +50,12 @@ MAX_DIAS_OBS_GRAFICO = 7
 st.markdown(
     """
     <style>
+    /* Reducir espacios verticales para evitar scroll innecesario */
+    .block-container {
+        padding-top: 0.8rem;
+        padding-bottom: 0.2rem;
+    }
+
     .main-title {
         font-size: 3.2rem;
         font-weight: 900;
@@ -71,13 +77,13 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 22px;
-        margin-top: 0.5rem;
-        margin-bottom: 1.2rem;
+        margin-top: 0.2rem;
+        margin-bottom: 0.6rem;
     }
 
     .header-logo {
-        width: 145px;
-        min-width: 145px;
+        width: 125px;
+        min-width: 125px;
     }
 
     .header-text {
@@ -90,8 +96,8 @@ st.markdown(
         font-size: 1.15rem;
         font-weight: 700;
         color: #0f172a;
-        margin-top: 0.5rem;
-        margin-bottom: 0.5rem;
+        margin-top: 0.25rem;
+        margin-bottom: 0.35rem;
     }
 
     .stMetric {
@@ -1043,7 +1049,7 @@ def graficar_pronostico_actual(
         )
 
     fig.update_layout(
-        height=460,
+        height=420,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
@@ -1237,7 +1243,7 @@ def graficar_validacion_historica(
     )
 
     fig.update_layout(
-        height=470,
+        height=420,
         margin=dict(l=20, r=20, t=30, b=20),
         xaxis_title="Fecha",
         yaxis_title="Nivel del río (m)",
@@ -1487,7 +1493,7 @@ with col_mapa:
     mapa_evento = st_folium(
         mapa,
         width=520,
-        height=650,
+        height=560,
         key="mapa_estaciones_click",
         returned_objects=["last_object_clicked_tooltip"],
     )
@@ -1517,13 +1523,6 @@ with col_mapa:
         except Exception:
             pass
 
-    if not estacion_map_est.empty:
-        lat_sel = estacion_map_est["lat"].iloc[0]
-        lon_sel = estacion_map_est["lon"].iloc[0]
-
-        st.caption(
-            f"Coordenadas: lat {formato_num(lat_sel, 4)}, lon {formato_num(lon_sel, 4)}"
-        )
 
 
 # ============================================================

@@ -874,10 +874,13 @@ def crear_mapa_estaciones(
     else:
         mapa = folium.Map(
             location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
-            zoom_start=6,
+            zoom_start=7,
             tiles="CartoDB positron",
             control_scale=True,
         )
+
+    # Lista para calcular el encuadre automático del mapa
+    puntos_validos = []
 
     if not estaciones.empty:
         for _, row in estaciones.iterrows():
@@ -888,6 +891,8 @@ def crear_mapa_estaciones(
 
             if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
                 continue
+
+            puntos_validos.append([float(lat), float(lon)])
 
             comid_int = int(comid)
             seleccionado = comid_sel is not None and comid_int == int(comid_sel)
@@ -945,6 +950,34 @@ def crear_mapa_estaciones(
                 ),
                 interactive=False,
             ).add_to(mapa)
+
+    # ------------------------------------------------------------
+    # Encuadre automático a las estaciones de Loreto
+    # ------------------------------------------------------------
+    # Esto evita que el mapa cargue mostrando demasiado territorio
+    # y enfoca la vista inicial en el conjunto real de estaciones.
+    if puntos_validos:
+        try:
+            lats = [p[0] for p in puntos_validos]
+            lons = [p[1] for p in puntos_validos]
+
+            lat_min = min(lats)
+            lat_max = max(lats)
+            lon_min = min(lons)
+            lon_max = max(lons)
+
+            # Margen visual para que los puntos no queden pegados al borde
+            margen_lat = max((lat_max - lat_min) * 0.12, 0.20)
+            margen_lon = max((lon_max - lon_min) * 0.12, 0.20)
+
+            mapa.fit_bounds(
+                [
+                    [lat_min - margen_lat, lon_min - margen_lon],
+                    [lat_max + margen_lat, lon_max + margen_lon],
+                ]
+            )
+        except Exception:
+            pass
 
     return mapa
 

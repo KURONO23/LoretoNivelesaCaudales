@@ -36,6 +36,7 @@ METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
+SELLO_AGUA_FILE = BASE_DIR / "frontend" / "assets" / "sello_agua_amaru.png"
 
 DIAS_OBS_GRAFICO = 5
 MAX_DIAS_OBS_GRAFICO = 7
@@ -163,6 +164,56 @@ st.markdown(
         line-height: 1.10;
     }
 
+    .amaru-kpi-card {
+        position: relative;
+        overflow: hidden;
+        background: #ffffff;
+        border: 1px solid #dbe4ef;
+        border-radius: 10px;
+        padding: 10px 12px;
+        min-height: 76px;
+        box-shadow: 0px 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    .amaru-kpi-watermark {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        width: 58px;
+        height: 58px;
+        transform: translateY(-50%);
+        opacity: 0.075;
+        object-fit: contain;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    .amaru-kpi-label {
+        position: relative;
+        z-index: 1;
+        font-size: 0.78rem;
+        color: #334155;
+        font-weight: 600;
+        line-height: 1.15;
+    }
+
+    .amaru-kpi-value {
+        position: relative;
+        z-index: 1;
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #0f172a;
+        line-height: 1.20;
+        margin-top: 6px;
+    }
+
+    .amaru-kpi-delta {
+        font-size: 0.78rem;
+        font-weight: 800;
+        margin-left: 8px;
+        white-space: nowrap;
+    }
+
     /* ============================================================
        SIDEBAR: solo uniformidad, no se cambia estructura
     ============================================================ */
@@ -201,11 +252,17 @@ st.markdown(
     ============================================================ */
 
     iframe {
-        border-radius: 9px !important;
+        border: 1px solid #dbe4ef !important;
+        border-radius: 12px !important;
+        box-shadow: 0px 1px 4px rgba(15, 23, 42, 0.10);
     }
 
     div[data-testid="stPlotlyChart"] {
-        border-radius: 9px;
+        border: 1px solid #dbe4ef;
+        border-radius: 12px;
+        box-shadow: 0px 1px 4px rgba(15, 23, 42, 0.08);
+        padding: 2px;
+        background: #ffffff;
     }
 
     div[data-testid="stCaptionContainer"] {
@@ -274,6 +331,47 @@ def formato_num(x, nd: int = 2) -> str:
         return f"{float(x):.{nd}f}"
     except Exception:
         return "Sin dato"
+
+
+def imagen_a_base64(path: Path) -> str:
+    if path is None or not Path(path).exists():
+        return ""
+
+    try:
+        return base64.b64encode(Path(path).read_bytes()).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def render_kpi_card(
+    label: str,
+    value: str,
+    watermark_b64: str = "",
+    extra_html: str = "",
+) -> None:
+    watermark_html = ""
+
+    if watermark_b64:
+        watermark_html = f"""
+            <img
+                src="data:image/png;base64,{watermark_b64}"
+                class="amaru-kpi-watermark"
+            >
+        """
+
+    st.markdown(
+        f"""
+        <div class="amaru-kpi-card">
+            {watermark_html}
+            <div class="amaru-kpi-label">{html.escape(str(label))}</div>
+            <div class="amaru-kpi-value">
+                {html.escape(str(value))}
+                {extra_html}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def clasificar_tendencia(delta) -> str:
@@ -874,13 +972,10 @@ def crear_mapa_estaciones(
     else:
         mapa = folium.Map(
             location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
-            zoom_start=7,
+            zoom_start=6,
             tiles="CartoDB positron",
             control_scale=True,
         )
-
-    # Lista para calcular el encuadre automático del mapa
-    puntos_validos = []
 
     if not estaciones.empty:
         for _, row in estaciones.iterrows():
@@ -891,8 +986,6 @@ def crear_mapa_estaciones(
 
             if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
                 continue
-
-            puntos_validos.append([float(lat), float(lon)])
 
             comid_int = int(comid)
             seleccionado = comid_sel is not None and comid_int == int(comid_sel)
@@ -951,34 +1044,6 @@ def crear_mapa_estaciones(
                 interactive=False,
             ).add_to(mapa)
 
-    # ------------------------------------------------------------
-    # Encuadre automático a las estaciones de Loreto
-    # ------------------------------------------------------------
-    # Esto evita que el mapa cargue mostrando demasiado territorio
-    # y enfoca la vista inicial en el conjunto real de estaciones.
-    if puntos_validos:
-        try:
-            lats = [p[0] for p in puntos_validos]
-            lons = [p[1] for p in puntos_validos]
-
-            lat_min = min(lats)
-            lat_max = max(lats)
-            lon_min = min(lons)
-            lon_max = max(lons)
-
-            # Margen visual para que los puntos no queden pegados al borde
-            margen_lat = max((lat_max - lat_min) * 0.12, 0.20)
-            margen_lon = max((lon_max - lon_min) * 0.12, 0.20)
-
-            mapa.fit_bounds(
-                [
-                    [lat_min - margen_lat, lon_min - margen_lon],
-                    [lat_max + margen_lat, lon_max + margen_lon],
-                ]
-            )
-        except Exception:
-            pass
-
     return mapa
 
 
@@ -1015,7 +1080,7 @@ def graficar_pronostico_actual(
         st.caption(mensaje_obs)
 
     st.markdown(
-        '<div class="section-title">Nivel observado y pronóstico ajustado a 7 días</div>',
+        '<div class="section-title">Nivel observado + pronóstico ajustado de 7 días</div>',
         unsafe_allow_html=True,
     )
 
@@ -1222,8 +1287,11 @@ def graficar_pronostico_actual(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "Observado reciente en negro. Pronóstico ajustado en azul. "
-        "Línea punteada: continuidad observado-pronóstico. Banda azul: rango min–max entre modelos."
+        "La línea negra representa el nivel observado reciente. "
+        "La línea punteada negra une visualmente el último observado con el primer pronóstico ajustado. "
+        "La línea azul representa la media ajustada de los modelos. "
+        "La banda azul clara representa el rango ajustado min–max entre modelos. "
+        "Los modelos individuales ajustados pueden activarse desde la leyenda."
     )
 
 
@@ -1419,8 +1487,10 @@ def graficar_validacion_historica(
     st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
-        "Observado real en negro. Pronóstico histórico ajustado en azul. "
-        "Banda azul: rango min–max entre modelos."
+        "La línea negra representa el nivel observado real. "
+        "La línea azul representa la media ajustada del pronóstico emitido. "
+        "La banda azul clara representa el rango ajustado min–max entre modelos. "
+        "Los modelos individuales ajustados pueden activarse desde la leyenda."
     )
 
 
@@ -1437,6 +1507,8 @@ historico = cargar_historico_pronosticos()
 
 if "nivel_m" in obs.columns:
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
+
+SELLO_AGUA_BASE64 = imagen_a_base64(SELLO_AGUA_FILE)
 
 
 # ============================================================
@@ -1644,7 +1716,7 @@ col_mapa, col_panel = st.columns([0.95, 2.05], gap="large")
 # ============================================================
 
 with col_mapa:
-    st.markdown('<div class="section-title">Mapa operativo de estaciones – Loreto</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Mapa de estaciones</div>', unsafe_allow_html=True)
 
     mapa = crear_mapa_estaciones(
         estaciones=estaciones,
@@ -1694,12 +1766,7 @@ with col_mapa:
 
 with col_panel:
     st.markdown(
-        f'''
-        <div class="section-title">
-            Pronóstico hidrológico operativo – Loreto
-            <span style="font-weight:700; color:#475569;"> | Estación: {html.escape(str(estacion_sel))}</span>
-        </div>
-        ''',
+        f'<div class="section-title">Estación: {estacion_sel}</div>',
         unsafe_allow_html=True,
     )
 
@@ -1725,15 +1792,19 @@ with col_panel:
 
         k1, k2, k3 = st.columns(3)
 
-        k1.metric(
-            "Nivel observado reciente",
-            f"{formato_num(nivel_obs_reciente)} m",
-        )
+        with k1:
+            render_kpi_card(
+                label="Nivel observado reciente",
+                value=f"{formato_num(nivel_obs_reciente)} m",
+                watermark_b64=SELLO_AGUA_BASE64,
+            )
 
-        k2.metric(
-            "Nivel pronosticado ajustado",
-            f"{formato_num(nivel_fin)} m",
-        )
+        with k2:
+            render_kpi_card(
+                label="Nivel pronosticado ajustado",
+                value=f"{formato_num(nivel_fin)} m",
+                watermark_b64=SELLO_AGUA_BASE64,
+            )
 
         tendencia_txt = clasificar_tendencia(tendencia_val)
 
@@ -1754,22 +1825,18 @@ with col_panel:
             tendencia_flecha = "→"
             tendencia_delta = f"{formato_num(tendencia_val)} m"
 
+        tendencia_extra_html = f"""
+            <span class="amaru-kpi-delta" style="color:{tendencia_color};">
+                {tendencia_flecha} {tendencia_delta}
+            </span>
+        """
+
         with k3:
-            st.markdown(
-                f"""
-                <div class="stMetric">
-                    <div style="font-size:0.78rem;color:#334155;font-weight:600;line-height:1.15;">
-                        Tendencia esperada
-                    </div>
-                    <div style="font-size:1.15rem;font-weight:800;color:#0f172a;line-height:1.20;margin-top:6px;">
-                        {tendencia_txt}
-                        <span style="color:{tendencia_color};font-size:0.78rem;font-weight:800;margin-left:8px;white-space:nowrap;">
-                            {tendencia_flecha} {tendencia_delta}
-                        </span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            render_kpi_card(
+                label="Tendencia esperada",
+                value=tendencia_txt,
+                watermark_b64="",
+                extra_html=tendencia_extra_html,
             )
 
         graficar_pronostico_actual(

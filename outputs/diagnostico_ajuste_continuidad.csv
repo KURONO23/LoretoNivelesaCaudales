@@ -1,19 +1,19 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-09-06,2026-09-05,8.25,6.859,1.391,8.25,0.0,1,Sí,Ajuste aplicado
-Bellavista,9036028,2026-09-06,2026-09-05,5.19,5.279,-0.089,5.19,0.0,1,Sí,Ajuste aplicado
-Timicurillo,9036459,2026-09-06,2026-09-01,7.83,5.438,2.392,7.83,0.0,5,Sí,Offset alto: 2.39 m. Revisar estación.
-Puerto Almendra,9037610,2026-09-06,2026-09-05,2.7,2.549,0.151,2.7,0.0,1,Sí,Ajuste aplicado
-Santa María de Nanay,9037738,2026-09-06,2026-09-05,4.02,3.94,0.08,4.02,0.0,1,Sí,Ajuste aplicado
-ENAPU,9038134,2026-09-06,2026-09-05,4.84,29.672,-24.832,4.84,0.0,1,Sí,Offset alto: -24.83 m. Revisar estación.
-Tamshiyacu,9038269,2026-09-06,2026-09-05,2.69,2.386,0.304,2.69,0.0,1,Sí,Ajuste aplicado
-Santa Rosa,9039635,2026-09-06,2026-09-05,4.02,3.248,0.772,4.02,0.0,1,Sí,Ajuste aplicado
-Borja,9040208,2026-09-06,2026-09-05,3.8,4.547,-0.747,3.8,0.0,1,Sí,Ajuste aplicado
-San Regis,9040439,2026-09-06,2026-09-05,5.36,5.69,-0.33,5.36,0.0,1,Sí,Ajuste aplicado
-Nauta,9040454,2026-09-06,2026-09-05,6.48,5.465,1.015,6.48,0.0,1,Sí,Ajuste aplicado
-San Lorenzo,9042153,2026-09-06,2025-09-30,7.19,9.744,,9.744,,341,No,Observado muy antiguo para ajuste: 341 días
-Genaro Herrera,9042214,2026-09-06,2026-09-05,7.22,8.459,-1.239,7.22,0.0,1,Sí,Ajuste aplicado
-Angamos,9043370,2026-09-06,2026-09-05,0.67,7.474,-6.804,0.67,-0.0,1,Sí,Offset alto: -6.80 m. Revisar estación.
-Requena,9043425,2026-09-06,2026-09-05,5.76,5.717,0.043,5.76,0.0,1,Sí,Ajuste aplicado
-Lagunas,9043597,2026-09-06,2026-09-05,3.9,5.341,-1.441,3.9,0.0,1,Sí,Ajuste aplicado
-Flor de Punga,9044756,2026-09-06,2026-05-14,22.8,11.78,,11.78,,115,No,Observado muy antiguo para ajuste: 115 días
-Contamana,9053555,2026-09-06,2026-09-05,5.47,12.87,-7.4,5.47,0.0,1,Sí,Offset alto: -7.40 m. Revisar estación.
+Santa Clotilde,9032282,2026-09-07,2026-09-07,7.77,6.814,0.956,7.77,0.0,0,Sí,Ajuste aplicado
+Bellavista,9036028,2026-09-07,2026-09-07,5.28,5.254,0.026,5.28,0.0,0,Sí,Ajuste aplicado
+Timicurillo,9036459,2026-09-07,2026-09-01,7.83,5.535,2.295,7.83,0.0,6,Sí,Offset alto: 2.29 m. Revisar estación.
+Puerto Almendra,9037610,2026-09-07,2026-09-07,2.62,2.626,-0.006,2.62,0.0,0,Sí,Ajuste aplicado
+Santa María de Nanay,9037738,2026-09-07,2026-09-07,4.14,4.055,0.085,4.14,0.0,0,Sí,Ajuste aplicado
+ENAPU,9038134,2026-09-07,2026-09-07,4.49,28.54,-24.05,4.49,0.0,0,Sí,Offset alto: -24.05 m. Revisar estación.
+Tamshiyacu,9038269,2026-09-07,2026-09-07,2.34,2.412,-0.072,2.34,0.0,0,Sí,Ajuste aplicado
+Santa Rosa,9039635,2026-09-07,2026-09-07,3.86,3.25,0.61,3.86,0.0,0,Sí,Ajuste aplicado
+Borja,9040208,2026-09-07,2026-09-07,4.15,4.569,-0.419,4.15,0.0,0,Sí,Ajuste aplicado
+San Regis,9040439,2026-09-07,2026-09-07,4.93,5.649,-0.719,4.93,0.0,0,Sí,Ajuste aplicado
+Nauta,9040454,2026-09-07,2026-09-07,6.19,5.486,0.704,6.19,0.0,0,Sí,Ajuste aplicado
+San Lorenzo,9042153,2026-09-07,2025-09-30,7.19,9.757,,9.757,,342,No,Observado muy antiguo para ajuste: 342 días
+Genaro Herrera,9042214,2026-09-07,2026-09-07,6.7,8.469,-1.769,6.7,0.0,0,Sí,Offset alto: -1.77 m. Revisar estación.
+Angamos,9043370,2026-09-07,2026-09-07,0.57,7.461,-6.891,0.57,0.0,0,Sí,Offset alto: -6.89 m. Revisar estación.
+Requena,9043425,2026-09-07,2026-09-07,5.34,5.61,-0.27,5.34,0.0,0,Sí,Ajuste aplicado
+Lagunas,9043597,2026-09-07,2026-09-07,3.87,5.102,-1.232,3.87,0.0,0,Sí,Ajuste aplicado
+Flor de Punga,9044756,2026-09-07,2026-05-14,22.8,11.802,,11.802,,116,No,Observado muy antiguo para ajuste: 116 días
+Contamana,9053555,2026-09-07,2026-09-07,5.4,12.87,-7.47,5.4,0.0,0,Sí,Offset alto: -7.47 m. Revisar estación.

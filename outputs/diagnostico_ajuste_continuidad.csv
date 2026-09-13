@@ -1,21 +1,21 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-09-12,2026-09-11,7.27,6.712,0.558,7.27,0.0,1,Sí,Ajuste aplicado
-Bellavista,9036028,2026-09-12,2026-09-12,4.59,5.052,-0.462,4.59,0.0,0,Sí,Ajuste aplicado
-Timicurillo,9036459,2026-09-12,2026-09-01,7.83,5.726,,5.726,,11,No,Observado muy antiguo para ajuste: 11 días
-Puerto Almendra,9037610,2026-09-12,2026-09-12,2.3,2.718,-0.418,2.3,0.0,0,Sí,Ajuste aplicado
-Santa María de Nanay,9037738,2026-09-12,2026-09-12,3.9,3.922,-0.022,3.9,0.0,0,Sí,Ajuste aplicado
-ENAPU,9038134,2026-09-12,2026-09-12,3.86,2.98,0.88,3.86,0.0,0,Sí,Ajuste aplicado
-Tamshiyacu,9038269,2026-09-12,2026-09-12,1.89,2.331,-0.441,1.89,0.0,0,Sí,Ajuste aplicado
-Puerto Alegria,9038835,2026-09-12,2026-09-12,9.96,10.81,-0.85,9.96,0.0,0,Sí,Ajuste aplicado
-Santa Rosa,9039635,2026-09-12,2026-09-11,3.21,3.362,-0.152,3.21,0.0,1,Sí,Ajuste aplicado
-Borja,9040208,2026-09-12,2026-09-12,4.25,4.416,-0.166,4.25,0.0,0,Sí,Ajuste aplicado
-San Regis,9040439,2026-09-12,2026-09-12,4.79,5.362,-0.572,4.79,0.0,0,Sí,Ajuste aplicado
-Nauta,9040454,2026-09-12,2026-09-12,5.61,5.218,0.392,5.61,0.0,0,Sí,Ajuste aplicado
-San Lorenzo,9042153,2026-09-12,2025-09-30,7.19,9.794,,9.794,,347,No,Observado muy antiguo para ajuste: 347 días
-Genaro Herrera,9042214,2026-09-12,2026-09-12,6.28,8.463,-2.183,6.28,0.0,0,Sí,Offset alto: -2.18 m. Revisar estación.
-Angamos,9043370,2026-09-12,2026-09-12,0.82,7.429,-6.609,0.82,0.0,0,Sí,Offset alto: -6.61 m. Revisar estación.
-Requena,9043425,2026-09-12,2026-09-12,4.77,5.333,-0.563,4.77,0.0,0,Sí,Ajuste aplicado
-Lagunas,9043597,2026-09-12,2026-09-12,3.95,4.416,-0.466,3.95,0.0,0,Sí,Ajuste aplicado
-Flor de Punga,9044756,2026-09-12,2026-05-14,22.8,11.84,,11.84,,121,No,Observado muy antiguo para ajuste: 121 días
-Yurimaguas,9046779,2026-09-12,2026-09-11,127.34,128.036,-0.696,127.34,0.0,1,Sí,Ajuste aplicado
-Contamana,9053555,2026-09-12,2026-09-12,6.6,12.295,-5.695,6.6,0.0,0,Sí,Offset alto: -5.69 m. Revisar estación.
+Santa Clotilde,9032282,2026-09-13,2026-09-11,7.27,6.705,0.565,7.27,0.0,2,Sí,Ajuste aplicado
+Bellavista,9036028,2026-09-13,2026-09-12,4.59,5.037,-0.447,4.59,0.0,1,Sí,Ajuste aplicado
+Timicurillo,9036459,2026-09-13,2026-09-01,7.83,5.532,,5.532,,12,No,Observado muy antiguo para ajuste: 12 días
+Puerto Almendra,9037610,2026-09-13,2026-09-12,2.3,2.714,-0.414,2.3,0.0,1,Sí,Ajuste aplicado
+Santa María de Nanay,9037738,2026-09-13,2026-09-12,3.9,3.945,-0.045,3.9,0.0,1,Sí,Ajuste aplicado
+ENAPU,9038134,2026-09-13,2026-09-12,3.86,17.044,-13.184,3.86,-0.0,1,Sí,Offset alto: -13.18 m. Revisar estación.
+Tamshiyacu,9038269,2026-09-13,2026-09-13,1.85,2.288,-0.438,1.85,0.0,0,Sí,Ajuste aplicado
+Puerto Alegria,9038835,2026-09-13,2026-09-12,9.96,10.81,-0.85,9.96,0.0,1,Sí,Ajuste aplicado
+Santa Rosa,9039635,2026-09-13,2026-09-11,3.21,3.348,-0.138,3.21,0.0,2,Sí,Ajuste aplicado
+Borja,9040208,2026-09-13,2026-09-12,4.25,4.35,-0.1,4.25,0.0,1,Sí,Ajuste aplicado
+San Regis,9040439,2026-09-13,2026-09-12,4.79,5.337,-0.547,4.79,0.0,1,Sí,Ajuste aplicado
+Nauta,9040454,2026-09-13,2026-09-12,5.61,5.144,0.466,5.61,0.0,1,Sí,Ajuste aplicado
+San Lorenzo,9042153,2026-09-13,2025-09-30,7.19,9.755,,9.755,,348,No,Observado muy antiguo para ajuste: 348 días
+Genaro Herrera,9042214,2026-09-13,2026-09-12,6.28,8.467,-2.187,6.28,0.0,1,Sí,Offset alto: -2.19 m. Revisar estación.
+Angamos,9043370,2026-09-13,2026-09-12,0.82,7.427,-6.607,0.82,0.0,1,Sí,Offset alto: -6.61 m. Revisar estación.
+Requena,9043425,2026-09-13,2026-09-12,4.77,5.298,-0.528,4.77,0.0,1,Sí,Ajuste aplicado
+Lagunas,9043597,2026-09-13,2026-09-12,3.95,4.353,-0.403,3.95,0.0,1,Sí,Ajuste aplicado
+Flor de Punga,9044756,2026-09-13,2026-05-14,22.8,11.854,,11.854,,122,No,Observado muy antiguo para ajuste: 122 días
+Yurimaguas,9046779,2026-09-13,2026-09-11,127.34,128.043,-0.703,127.34,0.0,2,Sí,Ajuste aplicado
+Contamana,9053555,2026-09-13,2026-09-12,6.6,12.123,-5.523,6.6,0.0,1,Sí,Offset alto: -5.52 m. Revisar estación.

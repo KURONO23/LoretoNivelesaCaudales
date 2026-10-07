@@ -35,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy pyarrow requests openpyxl google-api-python-client google-auth google-auth-httplib2
 
-      - name: Actualizar Excel de predicciones en Drive
+      - name: Validar secretos de predicciones`r`n        env:`r`n          PRED_DRIVE_FOLDER_ID: ${{ secrets.PRED_DRIVE_FOLDER_ID }}`r`n          GOOGLE_SERVICE_JSON: ${{ secrets.GOOGLE_SERVICE_JSON }}`r`n        run: |`r`n          test -n "$PRED_DRIVE_FOLDER_ID"`r`n          test -n "$GOOGLE_SERVICE_JSON"`r`n`r`n      - name: Actualizar Excel de predicciones en Drive
         env:
           # Se prefiere el secreto dedicado. El fallback permite reutilizar
           # OBS_DRIVE_FOLDER_ID mientras se configura el nuevo secreto.
@@ -44,3 +44,4 @@ jobs:
           PRED_DRIVE_WRITE: "true"
         run: |
           python scripts/12_actualizar_predicciones_drive.py
+

@@ -282,13 +282,21 @@ def _leer_libro_backend(path_excel: Path, estacion: str) -> pd.DataFrame:
     salida["estacion"] = estacion
     salida["id_estacion"] = pd.to_numeric(df.get("ID_ESTACION"), errors="coerce")
     salida["fecha"] = pd.to_datetime(df["FECHA"], errors="coerce").dt.normalize()
+    columnas_horarias = []
     for origen, destino in (("H6", "h6"), ("H10", "h10"), ("H14", "h14"), ("H18", "h18")):
         salida[destino] = pd.to_numeric(df.get(origen), errors="coerce")
-    salida["nivel_m"] = pd.to_numeric(df["H_PROM"], errors="coerce")
+        columnas_horarias.append(destino)
+    nivel_hprom = pd.to_numeric(df["H_PROM"], errors="coerce")
+    nivel_horario = salida[columnas_horarias].replace(-999, np.nan).mean(axis=1, skipna=True)
+    salida["nivel_m"] = nivel_hprom.fillna(nivel_horario)
     estado = df.get("ESTADO_FECHA")
     salida["estado_fecha"] = estado.astype(str) if estado is not None else ""
     salida["fuente"] = "PREDICCIONES306090_DRIVE"
     salida = salida.dropna(subset=["fecha"]).sort_values(["estacion", "fecha"])
+    print(
+        f"[CACHE] {estacion}: filas={len(salida):,} | "
+        f"niveles_validos={salida['nivel_m'].notna().sum():,}"
+    )
     return salida.reset_index(drop=True)
 
 

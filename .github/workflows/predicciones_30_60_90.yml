@@ -1,0 +1,46 @@
+name: Actualizar predicciones 30 60 90
+
+# 13:00 hora de Peru = 18:00 UTC.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+# Esta Action no necesita escribir en el repositorio: actualiza los Excel
+# existentes en Drive usando files.update sobre su mismo file_id.
+permissions:
+  contents: read
+
+concurrency:
+  group: actualizar-predicciones-30-60-90
+  cancel-in-progress: false
+
+jobs:
+  actualizar-predicciones:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias del actualizador
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy pyarrow requests openpyxl google-api-python-client google-auth google-auth-httplib2
+
+      - name: Actualizar Excel de predicciones en Drive
+        env:
+          # Se prefiere el secreto dedicado. El fallback permite reutilizar
+          # OBS_DRIVE_FOLDER_ID mientras se configura el nuevo secreto.
+          PRED_DRIVE_FOLDER_ID: ${{ secrets.PRED_DRIVE_FOLDER_ID || secrets.OBS_DRIVE_FOLDER_ID }}
+          GOOGLE_SERVICE_JSON: ${{ secrets.GOOGLE_SERVICE_JSON }}
+          PRED_DRIVE_WRITE: "true"
+        run: |
+          python scripts/12_actualizar_predicciones_drive.py

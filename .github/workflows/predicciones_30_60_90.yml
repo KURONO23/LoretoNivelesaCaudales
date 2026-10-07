@@ -9,7 +9,7 @@ on:
 # Esta Action no necesita escribir en el repositorio: actualiza los Excel
 # existentes en Drive usando files.update sobre su mismo file_id.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: actualizar-predicciones-30-60-90
@@ -50,4 +50,23 @@ jobs:
           PRED_DRIVE_WRITE: "true"
         run: |
           python scripts/12_actualizar_predicciones_drive.py
+
+      - name: Calcular pronósticos 30 60 90
+        run: |
+          python scripts/13_pronostico_30_60_90_analogos.py
+
+      - name: Publicar salida diaria para el frontend
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_actual.parquet
+          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_actual.csv
+          git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90.csv
+          if git diff --cached --quiet; then
+            echo "No cambió la salida diaria de predicciones."
+          else
+            git commit -m "Actualizar pronosticos 30 60 90"
+            git pull --rebase origin main
+            git push origin main
+          fi
 

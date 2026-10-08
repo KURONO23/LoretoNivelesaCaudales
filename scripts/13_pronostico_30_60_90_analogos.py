@@ -330,8 +330,12 @@ def main() -> int:
         f"[PRED] parquet bruto filas={len(datos):,} | "
         f"fecha_dtype={datos['fecha'].dtype if 'fecha' in datos else 'ausente'} | "
         f"fechas_no_nulas={datos['fecha'].notna().sum():,} | "
-        f"niveles_no_nulos={datos['nivel_m'].notna().sum():,}"
+        f"niveles_no_nulos={datos['nivel_m'].notna().sum():,} | "
+        f"estaciones_no_nulas={datos['estacion'].notna().sum():,} | "
+        f"estaciones_unicas={datos['estacion'].nunique(dropna=True)}"
     )
+    if "estacion" in datos.columns:
+        print(f"[PRED] estaciones_muestra={datos['estacion'].dropna().astype(str).unique()[:5].tolist()}")
     datos.columns = [str(c).strip().lower() for c in datos.columns]
     requeridas = {"estacion", "fecha", "nivel_m"}
     if not requeridas.issubset(datos.columns):

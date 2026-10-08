@@ -326,6 +326,12 @@ def main() -> int:
         raise FileNotFoundError(f"No existe la caché de entrada: {INPUT_PARQUET}")
 
     datos = pd.read_parquet(INPUT_PARQUET)
+    print(
+        f"[PRED] parquet bruto filas={len(datos):,} | "
+        f"fecha_dtype={datos['fecha'].dtype if 'fecha' in datos else 'ausente'} | "
+        f"fechas_no_nulas={datos['fecha'].notna().sum():,} | "
+        f"niveles_no_nulos={datos['nivel_m'].notna().sum():,}"
+    )
     datos.columns = [str(c).strip().lower() for c in datos.columns]
     requeridas = {"estacion", "fecha", "nivel_m"}
     if not requeridas.issubset(datos.columns):

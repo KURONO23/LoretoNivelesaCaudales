@@ -309,6 +309,11 @@ def _guardar_cache_backend(libros: dict[str, pd.DataFrame]) -> None:
     cache = pd.concat(partes, ignore_index=True)
     cache = cache.drop_duplicates(["estacion", "fecha"], keep="last")
     cache = cache.sort_values(["estacion", "fecha"]).reset_index(drop=True)
+    print(
+        f"[CACHE] fechas_validas={cache['fecha'].notna().sum():,} | "
+        f"rango={cache['fecha'].min()} a {cache['fecha'].max()} | "
+        f"tipo_fecha={cache['fecha'].dtype}"
+    )
     cache.to_parquet(PRED_INPUT_PARQUET, index=False)
     cache.to_csv(PRED_INPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[CACHE] {PRED_INPUT_PARQUET} | filas: {len(cache):,}")

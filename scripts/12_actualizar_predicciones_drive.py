@@ -292,6 +292,10 @@ def _leer_libro_backend(path_excel: Path, estacion: str) -> pd.DataFrame:
     estado = df.get("ESTADO_FECHA")
     salida["estado_fecha"] = estado.astype(str) if estado is not None else ""
     salida["fuente"] = "PREDICCIONES306090_DRIVE"
+    # La asignación escalar sobre un DataFrame vacío no crea filas; se fija
+    # aquí, después de cargar las columnas con longitud, para conservar la
+    # estación al serializar la caché Parquet.
+    salida["estacion"] = estacion
     salida = salida.dropna(subset=["fecha"]).sort_values(["estacion", "fecha"])
     print(
         f"[CACHE] {estacion}: filas={len(salida):,} | "
@@ -309,11 +313,6 @@ def _guardar_cache_backend(libros: dict[str, pd.DataFrame]) -> None:
     cache = pd.concat(partes, ignore_index=True)
     cache = cache.drop_duplicates(["estacion", "fecha"], keep="last")
     cache = cache.sort_values(["estacion", "fecha"]).reset_index(drop=True)
-    print(
-        f"[CACHE] fechas_validas={cache['fecha'].notna().sum():,} | "
-        f"rango={cache['fecha'].min()} a {cache['fecha'].max()} | "
-        f"tipo_fecha={cache['fecha'].dtype}"
-    )
     cache.to_parquet(PRED_INPUT_PARQUET, index=False)
     cache.to_csv(PRED_INPUT_CSV, index=False, encoding="utf-8-sig")
     print(f"[CACHE] {PRED_INPUT_PARQUET} | filas: {len(cache):,}")

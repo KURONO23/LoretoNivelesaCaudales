@@ -198,23 +198,12 @@ def pronosticar_estacion(
     fecha_emision: pd.Timestamp,
 ) -> tuple[pd.DataFrame, dict]:
     datos = datos.copy()
-    print(
-        f"[PRED] {estacion}: entrada={len(datos):,} | "
-        f"fecha_dtype={datos['fecha'].dtype if 'fecha' in datos else 'ausente'} | "
-        f"nivel_validos_pre={pd.to_numeric(datos.get('nivel_m'), errors='coerce').notna().sum() if 'nivel_m' in datos else 0:,}"
-    )
     datos["fecha"] = pd.to_datetime(datos["fecha"], errors="coerce").dt.normalize()
     datos["nivel_m"] = pd.to_numeric(datos["nivel_m"], errors="coerce")
     datos = (
         datos.dropna(subset=["fecha", "nivel_m"])
         .sort_values("fecha")
         .drop_duplicates("fecha", keep="last")
-    )
-
-    print(
-        f"[PRED] {estacion}: después_limpieza={len(datos):,} | "
-        f"rango={datos['fecha'].min() if not datos.empty else 'NaT'} a "
-        f"{datos['fecha'].max() if not datos.empty else 'NaT'}"
     )
 
     if datos.empty:
@@ -326,16 +315,6 @@ def main() -> int:
         raise FileNotFoundError(f"No existe la caché de entrada: {INPUT_PARQUET}")
 
     datos = pd.read_parquet(INPUT_PARQUET)
-    print(
-        f"[PRED] parquet bruto filas={len(datos):,} | "
-        f"fecha_dtype={datos['fecha'].dtype if 'fecha' in datos else 'ausente'} | "
-        f"fechas_no_nulas={datos['fecha'].notna().sum():,} | "
-        f"niveles_no_nulos={datos['nivel_m'].notna().sum():,} | "
-        f"estaciones_no_nulas={datos['estacion'].notna().sum():,} | "
-        f"estaciones_unicas={datos['estacion'].nunique(dropna=True)}"
-    )
-    if "estacion" in datos.columns:
-        print(f"[PRED] estaciones_muestra={datos['estacion'].dropna().astype(str).unique()[:5].tolist()}")
     datos.columns = [str(c).strip().lower() for c in datos.columns]
     requeridas = {"estacion", "fecha", "nivel_m"}
     if not requeridas.issubset(datos.columns):
@@ -344,10 +323,6 @@ def main() -> int:
     datos["fecha"] = pd.to_datetime(datos["fecha"], errors="coerce").dt.normalize()
     datos["nivel_m"] = pd.to_numeric(datos["nivel_m"], errors="coerce")
     datos = datos.dropna(subset=["estacion", "fecha", "nivel_m"]).copy()
-    print(
-        f"[PRED] entrada total={len(datos):,} | estaciones={datos['estacion'].nunique()} | "
-        f"niveles_validos={datos['nivel_m'].notna().sum():,}"
-    )
     fecha_emision = pd.Timestamp(date.today())
 
     partes = []

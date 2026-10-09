@@ -63,10 +63,6 @@ jobs:
         run: |
           python scripts/17_pronostico_30_60_90_emos.py
 
-      - name: Calcular línea estructural Kalman experimental
-        run: |
-          python scripts/18_pronostico_30_60_90_kalman.py
-
       - name: Publicar salida diaria para el frontend
         run: |
           git config user.name "github-actions"
@@ -80,9 +76,6 @@ jobs:
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_emos_actual.parquet
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_emos_actual.csv
           git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_emos.csv
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_kalman_actual.parquet
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_kalman_actual.csv
-          git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_kalman.csv
           if git diff --cached --quiet; then
             echo "No cambió la salida diaria de predicciones."
           else

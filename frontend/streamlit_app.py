@@ -46,10 +46,6 @@ PREDICCIONES_306090_DTW_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90
 PREDICCIONES_306090_DTW_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.csv"
 PREDICCIONES_306090_EMOS_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.parquet"
 PREDICCIONES_306090_EMOS_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.csv"
-PREDICCIONES_306090_ARIMA_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_arima_actual.parquet"
-PREDICCIONES_306090_ARIMA_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_arima_actual.csv"
-PREDICCIONES_306090_ETS_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_ets_actual.parquet"
-PREDICCIONES_306090_ETS_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_ets_actual.csv"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
 
@@ -1730,8 +1726,6 @@ def graficar_pronostico_306090(
     obs_est: pd.DataFrame,
     pred_dtw_est: pd.DataFrame | None = None,
     pred_emos_est: pd.DataFrame | None = None,
-    pred_arima_est: pd.DataFrame | None = None,
-    pred_ets_est: pd.DataFrame | None = None,
 ) -> None:
     """Renderiza el método vigente y DTW como líneas comparables."""
     if pred_est.empty:
@@ -1790,30 +1784,6 @@ def graficar_pronostico_306090(
         emos_tmp["horizonte_dias"] = emos_tmp["horizonte_dias"].astype(int)
         emos_sel = emos_tmp[
             emos_tmp["horizonte_dias"] == horizonte_sel
-        ].sort_values("fecha_pronostico").copy()
-
-    arima_sel = pd.DataFrame()
-    if pred_arima_est is not None and not pred_arima_est.empty:
-        arima_tmp = pred_arima_est.copy()
-        arima_tmp["horizonte_dias"] = pd.to_numeric(
-            arima_tmp["horizonte_dias"], errors="coerce"
-        )
-        arima_tmp = arima_tmp.dropna(subset=["horizonte_dias"]).copy()
-        arima_tmp["horizonte_dias"] = arima_tmp["horizonte_dias"].astype(int)
-        arima_sel = arima_tmp[
-            arima_tmp["horizonte_dias"] == horizonte_sel
-        ].sort_values("fecha_pronostico").copy()
-
-    ets_sel = pd.DataFrame()
-    if pred_ets_est is not None and not pred_ets_est.empty:
-        ets_tmp = pred_ets_est.copy()
-        ets_tmp["horizonte_dias"] = pd.to_numeric(
-            ets_tmp["horizonte_dias"], errors="coerce"
-        )
-        ets_tmp = ets_tmp.dropna(subset=["horizonte_dias"]).copy()
-        ets_tmp["horizonte_dias"] = ets_tmp["horizonte_dias"].astype(int)
-        ets_sel = ets_tmp[
-            ets_tmp["horizonte_dias"] == horizonte_sel
         ].sort_values("fecha_pronostico").copy()
 
     if pred_sel.empty:
@@ -2000,32 +1970,6 @@ def graficar_pronostico_306090(
             )
         )
 
-    if not arima_sel.empty and "nivel_arima_m" in arima_sel.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=arima_sel["fecha_pronostico"],
-                y=arima_sel["nivel_arima_m"],
-                mode="lines+markers",
-                name="Pronóstico ARIMA (experimental)",
-                line=dict(width=2.5, color="#dc2626", dash="longdash"),
-                marker=dict(size=4, color="#dc2626"),
-                connectgaps=False,
-            )
-        )
-
-    if not ets_sel.empty and "nivel_ets_m" in ets_sel.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=ets_sel["fecha_pronostico"],
-                y=ets_sel["nivel_ets_m"],
-                mode="lines+markers",
-                name="Pronóstico ETS (experimental)",
-                line=dict(width=2.5, color="#0891b2", dash="dashdot"),
-                marker=dict(size=4, color="#0891b2"),
-                connectgaps=False,
-            )
-        )
-
     if "nivel_analogos_m" in pred_sel.columns:
         fig.add_trace(
             go.Scatter(
@@ -2076,7 +2020,7 @@ def graficar_pronostico_306090(
         "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
         "La línea punteada une visualmente el último observado con el primer pronóstico. "
         "La línea azul es el método vigente, la línea naranja discontinua es DTW experimental "
-        "y la línea violeta es EMOS/BMA experimental; la roja es ARIMA y la celeste ETS. "
+        "y la línea violeta es EMOS/BMA experimental. "
         "La banda azul representa "
         "P10–P90 del método vigente."
     )
@@ -2126,16 +2070,6 @@ predicciones_306090_emos = cargar_predicciones_306090(
     parquet_path=PREDICCIONES_306090_EMOS_PARQUET,
     csv_path=PREDICCIONES_306090_EMOS_CSV,
     fuente="EMOS/BMA lineal (experimental)",
-)
-predicciones_306090_arima = cargar_predicciones_306090(
-    parquet_path=PREDICCIONES_306090_ARIMA_PARQUET,
-    csv_path=PREDICCIONES_306090_ARIMA_CSV,
-    fuente="ARIMA (experimental)",
-)
-predicciones_306090_ets = cargar_predicciones_306090(
-    parquet_path=PREDICCIONES_306090_ETS_PARQUET,
-    csv_path=PREDICCIONES_306090_ETS_CSV,
-    fuente="ETS (experimental)",
 )
 resumen_306090 = cargar_resumen_306090()
 
@@ -2498,27 +2432,11 @@ else:
             pred_306090_emos_est = predicciones_306090_emos[mask_estacion_emos].copy()
         else:
             pred_306090_emos_est = pd.DataFrame()
-        if not predicciones_306090_arima.empty and "estacion" in predicciones_306090_arima.columns:
-            mask_estacion_arima = predicciones_306090_arima["estacion"].apply(
-                normalizar_texto
-            ) == estacion_sel_norm
-            pred_306090_arima_est = predicciones_306090_arima[mask_estacion_arima].copy()
-        else:
-            pred_306090_arima_est = pd.DataFrame()
-        if not predicciones_306090_ets.empty and "estacion" in predicciones_306090_ets.columns:
-            mask_estacion_ets = predicciones_306090_ets["estacion"].apply(
-                normalizar_texto
-            ) == estacion_sel_norm
-            pred_306090_ets_est = predicciones_306090_ets[mask_estacion_ets].copy()
-        else:
-            pred_306090_ets_est = pd.DataFrame()
     else:
         estaciones_mapa_306090 = pd.DataFrame()
         pred_306090_est = pd.DataFrame()
         pred_306090_dtw_est = pd.DataFrame()
         pred_306090_emos_est = pd.DataFrame()
-        pred_306090_arima_est = pd.DataFrame()
-        pred_306090_ets_est = pd.DataFrame()
 
     col_mapa_306090, col_panel_306090 = st.columns([0.95, 2.05], gap="large")
 
@@ -2547,7 +2465,7 @@ else:
         )
         st.caption(
             "Pronóstico independiente de DWLT. La línea azul corresponde al método vigente "
-            ", la naranja a DTW experimental, la violeta a EMOS/BMA experimental, la roja a ARIMA y la celeste a ETS. "
+            ", la naranja a DTW experimental y la violeta a EMOS/BMA experimental. "
             "La salida se actualiza diariamente "
             "a partir de los datos de HidroMet."
         )
@@ -2561,7 +2479,5 @@ else:
                 pred_est=pred_306090_est,
                 pred_dtw_est=pred_306090_dtw_est,
                 pred_emos_est=pred_306090_emos_est,
-                pred_arima_est=pred_306090_arima_est,
-                pred_ets_est=pred_306090_ets_est,
                 obs_est=obs_est,
             )

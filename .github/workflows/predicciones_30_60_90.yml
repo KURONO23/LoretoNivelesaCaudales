@@ -63,14 +63,6 @@ jobs:
         run: |
           python scripts/17_pronostico_30_60_90_emos.py
 
-      - name: Calcular línea ARIMA experimental
-        run: |
-          python scripts/19_pronostico_30_60_90_arima.py
-
-      - name: Calcular línea ETS experimental
-        run: |
-          python scripts/20_pronostico_30_60_90_ets.py
-
       - name: Publicar salida diaria para el frontend
         run: |
           git config user.name "github-actions"
@@ -84,12 +76,6 @@ jobs:
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_emos_actual.parquet
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_emos_actual.csv
           git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_emos.csv
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_arima_actual.parquet
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_arima_actual.csv
-          git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_arima.csv
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_ets_actual.parquet
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_ets_actual.csv
-          git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_ets.csv
           if git diff --cached --quiet; then
             echo "No cambió la salida diaria de predicciones."
           else

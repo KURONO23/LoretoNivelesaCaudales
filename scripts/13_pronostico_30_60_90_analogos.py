@@ -182,11 +182,28 @@ def predecir_analogos(
     alpha = np.clip(1 - plazos / 120.0, 0.25, 0.75)
     hibrido = alpha * analogos + (1 - alpha) * climatologia_futura
 
+    # La línea operativa es híbrida (análogos + climatología). Por tanto,
+    # el intervalo debe conservar la amplitud de la dispersión análoga, pero
+    # quedar centrado en esa línea híbrida. Si se dejan los percentiles
+    # alrededor de ``analogos``, la banda se desfasa cuando la climatología
+    # empieza a pesar en el horizonte.
+    p10_analogos = np.nanpercentile(ajustados, 10, axis=0)
+    p90_analogos = np.nanpercentile(ajustados, 90, axis=0)
+    centro_intervalo_analogos = 0.5 * (p10_analogos + p90_analogos)
+    traslado_intervalo = hibrido - centro_intervalo_analogos
+    p10 = p10_analogos + traslado_intervalo
+    p90 = p90_analogos + traslado_intervalo
+
+    # Salvaguarda numérica: el intervalo siempre debe contener la línea
+    # híbrida, incluso ante redondeos o dispersión degenerada.
+    p10 = np.minimum(p10, hibrido)
+    p90 = np.maximum(p90, hibrido)
+
     return {
         "analogos": analogos,
         "hibrido": hibrido,
-        "p10": np.nanpercentile(ajustados, 10, axis=0),
-        "p90": np.nanpercentile(ajustados, 90, axis=0),
+        "p10": p10,
+        "p90": p90,
         "n_analogos": int(len(tabla)),
         "distancia_media": float(tabla["distancia"].mean()),
     }

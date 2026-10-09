@@ -4,7 +4,7 @@ name: Actualizar predicciones 30 60 90
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "7 16 * * *"
 
 # Esta Action no necesita escribir en el repositorio: actualiza los Excel
 # existentes en Drive usando files.update sobre su mismo file_id.

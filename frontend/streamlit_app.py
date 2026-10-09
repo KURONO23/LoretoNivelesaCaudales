@@ -1923,41 +1923,8 @@ def graficar_pronostico_306090(
             f"Estado: {estado_tmp}"
         )
 
-    tabla = []
-    for horizonte in [30, 60, 90]:
-        tmp = pred_est[pred_est["horizonte_dias"] == horizonte].sort_values("fecha_pronostico")
-        if tmp.empty:
-            continue
-        col_tmp = "nivel_hibrido_m" if "nivel_hibrido_m" in tmp.columns else "nivel_pronosticado_m"
-        tmp_ok = tmp.dropna(subset=[col_tmp])
-        fin = tmp_ok.iloc[-1] if not tmp_ok.empty else tmp.iloc[-1]
-        tabla.append(
-            {
-                "Horizonte": f"H+{horizonte}",
-                "Fecha final": pd.to_datetime(fin.get("fecha_pronostico"), errors="coerce"),
-                "Nivel final (m)": fin.get(col_tmp, np.nan),
-                "P10 (m)": fin.get("p10_m", np.nan),
-                "P90 (m)": fin.get("p90_m", np.nan),
-                "Análogos": fin.get("n_analogos", np.nan),
-                "Estado": fin.get("estado", "Sin dato"),
-            }
-        )
-    if tabla:
-        st.dataframe(pd.DataFrame(tabla), use_container_width=True, hide_index=True)
-
-    with st.expander("Trazabilidad del cálculo"):
-        trazabilidad = {
-            "Fecha de emisión": fecha_emision.strftime("%d/%m/%Y") if not pd.isna(fecha_emision) else "Sin dato",
-            "Fecha de origen": fecha_origen.strftime("%d/%m/%Y") if not pd.isna(fecha_origen) else "Sin dato",
-            "Método": pred_sel["metodo"].dropna().iloc[0] if "metodo" in pred_sel and pred_sel["metodo"].notna().any() else "Sin dato",
-            "Ventana de análogos (días)": pred_sel["ventana_analogos_dias"].dropna().iloc[0] if "ventana_analogos_dias" in pred_sel and pred_sel["ventana_analogos_dias"].notna().any() else np.nan,
-            "N.º de datos usados": pred_sel["n_datos"].dropna().iloc[0] if "n_datos" in pred_sel and pred_sel["n_datos"].notna().any() else "No incluido en salida",
-        }
-        st.dataframe(pd.DataFrame([trazabilidad]), use_container_width=True, hide_index=True)
-        st.caption(
-            "Esta vista consume únicamente la emisión vigente del backend 30/60/90. "
-            "El pronóstico es operativo experimental hasta completar su validación independiente por estación."
-        )
+    # Se omiten la tabla extensa y la trazabilidad desplegable para mantener
+    # la vista operativa compacta y evitar desplazamiento vertical innecesario.
 
 
 # ============================================================

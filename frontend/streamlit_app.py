@@ -1154,6 +1154,56 @@ def crear_mapa_estaciones(
     return mapa
 
 
+def renderizar_mapa_operativo(
+    estaciones_mapa: pd.DataFrame,
+    estacion_sel: str,
+    comid_sel,
+    pron_resumen: pd.DataFrame,
+    comid_a_estacion: dict,
+    key: str,
+) -> None:
+    """Renderiza un mapa contextual y conserva la selección por marcador."""
+    st.markdown(
+        '<div class="section-title">Mapa operativo de estaciones – Loreto</div>',
+        unsafe_allow_html=True,
+    )
+
+    mapa = crear_mapa_estaciones(
+        estaciones=estaciones_mapa,
+        estacion_sel=estacion_sel,
+        comid_sel=comid_sel,
+        pron_resumen=pron_resumen,
+    )
+
+    mapa_evento = st_folium(
+        mapa,
+        width=520,
+        height=540,
+        key=key,
+        returned_objects=["last_object_clicked_tooltip"],
+    )
+
+    tooltip_click = mapa_evento.get("last_object_clicked_tooltip") if mapa_evento else None
+
+    if not tooltip_click or "||" not in tooltip_click:
+        return
+
+    _, comid_click_txt = tooltip_click.split("||", 1)
+
+    try:
+        comid_click = int(float(comid_click_txt))
+    except Exception:
+        return
+
+    if (
+        comid_click in comid_a_estacion
+        and comid_click != st.session_state.ultimo_click_comid
+    ):
+        st.session_state.ultimo_click_comid = comid_click
+        st.session_state.estacion_sel = comid_a_estacion[comid_click]
+        st.rerun()
+
+
 # ============================================================
 # GRÁFICOS
 # ============================================================
@@ -2122,82 +2172,37 @@ if comid_sel is not None:
 
 
 # ============================================================
-# LAYOUT
+# LAYOUT POR PESTAÑA
 # ============================================================
 
-col_mapa, col_panel = st.columns([0.95, 2.05], gap="large")
+tab_dwlt, tab_306090 = st.tabs(["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"])
 
+with tab_dwlt:
+    col_mapa_dwlt, col_panel_dwlt = st.columns([0.95, 2.05], gap="large")
 
-# ============================================================
-# MAPA
-# ============================================================
+    with col_mapa_dwlt:
+        renderizar_mapa_operativo(
+            estaciones_mapa=estaciones,
+            estacion_sel=estacion_sel,
+            comid_sel=comid_sel,
+            pron_resumen=pron_resumen,
+            comid_a_estacion=comid_a_estacion,
+            key="mapa_estaciones_dwlt",
+        )
 
-with col_mapa:
-    st.markdown('<div class="section-title">Mapa operativo de estaciones – Loreto</div>', unsafe_allow_html=True)
+    with col_panel_dwlt:
+        st.markdown(
+            f'''
+            <div class="section-title">
+                Pronóstico hidrológico operativo – Loreto
+                <span style="font-weight:700; color:#475569;"> | Estación: {html.escape(str(estacion_sel))}</span>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
 
-    mapa = crear_mapa_estaciones(
-        estaciones=estaciones,
-        estacion_sel=estacion_sel,
-        comid_sel=comid_sel,
-        pron_resumen=pron_resumen,
-    )
-
-    mapa_evento = st_folium(
-        mapa,
-        width=520,
-        height=540,
-        key="mapa_estaciones_click",
-        returned_objects=["last_object_clicked_tooltip"],
-    )
-
-    tooltip_click = None
-
-    if mapa_evento:
-        tooltip_click = mapa_evento.get("last_object_clicked_tooltip")
-
-    if tooltip_click and "||" in tooltip_click:
-        _, comid_click_txt = tooltip_click.split("||", 1)
-
-        try:
-            comid_click = int(float(comid_click_txt))
-
-            if (
-                comid_click in comid_a_estacion
-                and comid_click != st.session_state.ultimo_click_comid
-            ):
-                nueva_estacion = comid_a_estacion[comid_click]
-
-                st.session_state.ultimo_click_comid = comid_click
-                st.session_state.estacion_sel = nueva_estacion
-
-                st.rerun()
-
-        except Exception:
-            pass
-
-
-
-# ============================================================
-# PANEL PRINCIPAL
-# ============================================================
-
-with col_panel:
-    st.markdown(
-        f'''
-        <div class="section-title">
-            Pronóstico hidrológico operativo – Loreto
-            <span style="font-weight:700; color:#475569;"> | Estación: {html.escape(str(estacion_sel))}</span>
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-
-    tab_dwlt, tab_306090 = st.tabs(["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"])
-
-    with tab_dwlt:
         if modo == "Pronóstico actual":
             nivel_obs_reciente = None
-
             obs_d = observado_diario(obs_est)
 
             if not obs_d.empty:
@@ -2216,16 +2221,8 @@ with col_panel:
                     tendencia_val = nivel_fin - nivel_inicio
 
             k1, k2, k3 = st.columns(3)
-
-            k1.metric(
-                "Nivel observado reciente",
-                f"{formato_num(nivel_obs_reciente)} m",
-            )
-
-            k2.metric(
-                "Nivel pronosticado ajustado",
-                f"{formato_num(nivel_fin)} m",
-            )
+            k1.metric("Nivel observado reciente", f"{formato_num(nivel_obs_reciente)} m")
+            k2.metric("Nivel pronosticado ajustado", f"{formato_num(nivel_fin)} m")
 
             tendencia_txt = clasificar_tendencia(tendencia_val)
 
@@ -2264,10 +2261,7 @@ with col_panel:
                     unsafe_allow_html=True,
                 )
 
-            graficar_pronostico_actual(
-                pron_est=pron_est,
-                obs_est=obs_est,
-            )
+            graficar_pronostico_actual(pron_est=pron_est, obs_est=obs_est)
 
         else:
             st.info(
@@ -2278,26 +2272,50 @@ with col_panel:
             if not historico_ok:
                 st.warning("Todavía no existe archivo histórico. Ejecuta el workflow actualizado.")
             else:
-                graficar_validacion_historica(
-                    hist_est=hist_est,
-                    obs_est=obs_est,
-                )
+                graficar_validacion_historica(hist_est=hist_est, obs_est=obs_est)
 
-    with tab_306090:
-        if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
-            estacion_sel_norm = normalizar_texto(estacion_sel)
-            mask_estacion_306090 = predicciones_306090["estacion"].apply(
-                normalizar_texto
-            ) == estacion_sel_norm
-            pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
-        else:
-            pred_306090_est = pd.DataFrame()
+with tab_306090:
+    if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
+        nombres_306090 = set(predicciones_306090["estacion"].apply(normalizar_texto).dropna())
+        estaciones_mapa_306090 = estaciones[
+            estaciones["estacion"].apply(normalizar_texto).isin(nombres_306090)
+        ].copy()
+        estacion_sel_norm = normalizar_texto(estacion_sel)
+        mask_estacion_306090 = predicciones_306090["estacion"].apply(
+            normalizar_texto
+        ) == estacion_sel_norm
+        pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
+    else:
+        estaciones_mapa_306090 = pd.DataFrame()
+        pred_306090_est = pd.DataFrame()
 
+    col_mapa_306090, col_panel_306090 = st.columns([0.95, 2.05], gap="large")
+
+    with col_mapa_306090:
+        renderizar_mapa_operativo(
+            estaciones_mapa=estaciones_mapa_306090,
+            estacion_sel=estacion_sel,
+            comid_sel=comid_sel,
+            pron_resumen=pron_resumen,
+            comid_a_estacion=comid_a_estacion,
+            key="mapa_estaciones_306090",
+        )
+        st.caption(
+            f"Se muestran {len(estaciones_mapa_306090)} estaciones con salida 30/60/90 vigente."
+        )
+
+    with col_panel_306090:
+        st.markdown(
+            f'''
+            <div class="section-title">
+                Pronóstico hidrológico operativo – Loreto
+                <span style="font-weight:700; color:#475569;"> | Estación: {html.escape(str(estacion_sel))}</span>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Pronóstico independiente de DWLT. La salida vigente se actualiza diariamente "
             "a partir de los datos de HidroMet y conserva solo la emisión actual."
         )
-        graficar_pronostico_306090(
-            pred_est=pred_306090_est,
-            obs_est=obs_est,
-        )
+        graficar_pronostico_306090(pred_est=pred_306090_est, obs_est=obs_est)

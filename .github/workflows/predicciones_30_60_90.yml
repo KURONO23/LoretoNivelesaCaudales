@@ -59,10 +59,6 @@ jobs:
         run: |
           python scripts/15_pronostico_30_60_90_dtw.py
 
-      - name: Calibrar intervalo conformal experimental
-        run: |
-          python scripts/16_pronostico_30_60_90_conformal.py
-
       - name: Publicar salida diaria para el frontend
         run: |
           git config user.name "github-actions"
@@ -73,9 +69,6 @@ jobs:
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_dtw_actual.parquet
           git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_dtw_actual.csv
           git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_dtw.csv
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_conformal_actual.parquet
-          git add -f backend/predicciones_30_60_90/output/pronostico_30_60_90_conformal_actual.csv
-          git add -f backend/predicciones_30_60_90/output/resumen_pronostico_30_60_90_conformal.csv
           if git diff --cached --quiet; then
             echo "No cambió la salida diaria de predicciones."
           else

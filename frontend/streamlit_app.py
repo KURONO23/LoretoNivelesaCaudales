@@ -44,6 +44,8 @@ PREDICCIONES_306090_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_actual.
 RESUMEN_306090_CSV = PREDICCIONES_306090_DIR / "resumen_pronostico_30_60_90.csv"
 PREDICCIONES_306090_DTW_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.parquet"
 PREDICCIONES_306090_DTW_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.csv"
+PREDICCIONES_306090_EMOS_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.parquet"
+PREDICCIONES_306090_EMOS_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.csv"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
 
@@ -1723,6 +1725,7 @@ def graficar_pronostico_306090(
     pred_est: pd.DataFrame,
     obs_est: pd.DataFrame,
     pred_dtw_est: pd.DataFrame | None = None,
+    pred_emos_est: pd.DataFrame | None = None,
 ) -> None:
     """Renderiza el método vigente y DTW como líneas comparables."""
     if pred_est.empty:
@@ -1770,6 +1773,18 @@ def graficar_pronostico_306090(
         col_dtw = "nivel_hibrido_m" if "nivel_hibrido_m" in dtw_sel.columns else "nivel_pronosticado_m"
         if col_dtw in dtw_sel.columns:
             dtw_sel["nivel_dtw_m"] = pd.to_numeric(dtw_sel[col_dtw], errors="coerce")
+
+    emos_sel = pd.DataFrame()
+    if pred_emos_est is not None and not pred_emos_est.empty:
+        emos_tmp = pred_emos_est.copy()
+        emos_tmp["horizonte_dias"] = pd.to_numeric(
+            emos_tmp["horizonte_dias"], errors="coerce"
+        )
+        emos_tmp = emos_tmp.dropna(subset=["horizonte_dias"]).copy()
+        emos_tmp["horizonte_dias"] = emos_tmp["horizonte_dias"].astype(int)
+        emos_sel = emos_tmp[
+            emos_tmp["horizonte_dias"] == horizonte_sel
+        ].sort_values("fecha_pronostico").copy()
 
     if pred_sel.empty:
         st.warning(f"No hay datos para el horizonte de {horizonte_sel} días.")
@@ -1942,6 +1957,19 @@ def graficar_pronostico_306090(
             )
         )
 
+    if not emos_sel.empty and "nivel_emos_m" in emos_sel.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=emos_sel["fecha_pronostico"],
+                y=emos_sel["nivel_emos_m"],
+                mode="lines+markers",
+                name="Pronóstico EMOS/BMA (experimental)",
+                line=dict(width=2.5, color="#7c3aed"),
+                marker=dict(size=4, color="#7c3aed"),
+                connectgaps=False,
+            )
+        )
+
     if "nivel_analogos_m" in pred_sel.columns:
         fig.add_trace(
             go.Scatter(
@@ -1992,7 +2020,8 @@ def graficar_pronostico_306090(
         "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
         "La línea punteada une visualmente el último observado con el primer pronóstico. "
         "La línea azul es el método vigente, la línea naranja discontinua es DTW experimental "
-        "y la banda azul representa P10–P90 del método vigente."
+        "y la línea violeta es EMOS/BMA experimental. La banda azul representa "
+        "P10–P90 del método vigente."
     )
 
     st.markdown('<div class="section-title">Comparación de los tres horizontes</div>', unsafe_allow_html=True)
@@ -2035,6 +2064,11 @@ predicciones_306090_dtw = cargar_predicciones_306090(
     parquet_path=PREDICCIONES_306090_DTW_PARQUET,
     csv_path=PREDICCIONES_306090_DTW_CSV,
     fuente="Análogos DTW (experimental)",
+)
+predicciones_306090_emos = cargar_predicciones_306090(
+    parquet_path=PREDICCIONES_306090_EMOS_PARQUET,
+    csv_path=PREDICCIONES_306090_EMOS_CSV,
+    fuente="EMOS/BMA lineal (experimental)",
 )
 resumen_306090 = cargar_resumen_306090()
 
@@ -2390,10 +2424,18 @@ else:
             pred_306090_dtw_est = predicciones_306090_dtw[mask_estacion_dtw].copy()
         else:
             pred_306090_dtw_est = pd.DataFrame()
+        if not predicciones_306090_emos.empty and "estacion" in predicciones_306090_emos.columns:
+            mask_estacion_emos = predicciones_306090_emos["estacion"].apply(
+                normalizar_texto
+            ) == estacion_sel_norm
+            pred_306090_emos_est = predicciones_306090_emos[mask_estacion_emos].copy()
+        else:
+            pred_306090_emos_est = pd.DataFrame()
     else:
         estaciones_mapa_306090 = pd.DataFrame()
         pred_306090_est = pd.DataFrame()
         pred_306090_dtw_est = pd.DataFrame()
+        pred_306090_emos_est = pd.DataFrame()
 
     col_mapa_306090, col_panel_306090 = st.columns([0.95, 2.05], gap="large")
 
@@ -2422,7 +2464,8 @@ else:
         )
         st.caption(
             "Pronóstico independiente de DWLT. La línea azul corresponde al método vigente "
-            "y la naranja a DTW experimental. La salida se actualiza diariamente "
+            ", la naranja a DTW experimental y la violeta a EMOS/BMA experimental. "
+            "La salida se actualiza diariamente "
             "a partir de los datos de HidroMet."
         )
         if pred_306090_est.empty:
@@ -2434,5 +2477,6 @@ else:
             graficar_pronostico_306090(
                 pred_est=pred_306090_est,
                 pred_dtw_est=pred_306090_dtw_est,
+                pred_emos_est=pred_306090_emos_est,
                 obs_est=obs_est,
             )

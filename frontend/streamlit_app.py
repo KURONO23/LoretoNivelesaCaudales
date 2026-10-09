@@ -1932,8 +1932,16 @@ def graficar_pronostico_306090(
             )
         )
 
+    conformal_estado = (
+        str(conformal_sel["estado_conformal"].dropna().iloc[0])
+        if "estado_conformal" in conformal_sel
+        and conformal_sel["estado_conformal"].notna().any()
+        else ""
+    )
+    conformal_excluida = "EXCLUIDA" in normalizar_texto(conformal_estado)
     if (
         not conformal_sel.empty
+        and not conformal_excluida
         and "p90_conformal_m" in conformal_sel.columns
         and "p10_conformal_m" in conformal_sel.columns
     ):

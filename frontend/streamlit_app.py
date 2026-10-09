@@ -42,6 +42,8 @@ PREDICCIONES_306090_DIR = BASE_DIR / "backend" / "predicciones_30_60_90" / "outp
 PREDICCIONES_306090_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_actual.parquet"
 PREDICCIONES_306090_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_actual.csv"
 RESUMEN_306090_CSV = PREDICCIONES_306090_DIR / "resumen_pronostico_30_60_90.csv"
+PREDICCIONES_306090_DTW_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.parquet"
+PREDICCIONES_306090_DTW_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.csv"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
 
@@ -779,19 +781,24 @@ def cargar_historico_pronosticos() -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def cargar_predicciones_306090() -> pd.DataFrame:
+def cargar_predicciones_306090(
+    parquet_path: Path | None = None,
+    csv_path: Path | None = None,
+    fuente: str = "Análogos de estado",
+) -> pd.DataFrame:
     """Carga el resultado vigente del backend de pronósticos 30/60/90.
 
     Se utiliza Parquet como fuente preferida y CSV como respaldo. El archivo
     contiene únicamente la emisión vigente, por lo que esta pestaña no mezcla
     ejecuciones anteriores ni modifica los archivos de DWLT.
     """
-    path = PREDICCIONES_306090_PARQUET
+    path = parquet_path or PREDICCIONES_306090_PARQUET
+    fallback_csv = csv_path or PREDICCIONES_306090_CSV
     try:
         if path.exists():
             df = pd.read_parquet(path)
-        elif PREDICCIONES_306090_CSV.exists():
-            df = pd.read_csv(PREDICCIONES_306090_CSV)
+        elif fallback_csv.exists():
+            df = pd.read_csv(fallback_csv)
         else:
             return pd.DataFrame()
 
@@ -823,6 +830,10 @@ def cargar_predicciones_306090() -> pd.DataFrame:
 
         if "estacion" in df.columns:
             df["estacion"] = df["estacion"].astype(str).str.strip()
+
+        # Etiqueta de presentación para comparar variantes sin mezclar sus
+        # salidas ni cambiar la pestaña DWLT.
+        df["fuente_metodo"] = fuente
 
         return df
 
@@ -1963,7 +1974,14 @@ diagnostico = cargar_csv_sin_cache(DIAGNOSTICO_CSV)
 metricas = cargar_parquet_sin_cache(METRICAS_PARQUET)
 obs = cargar_parquet_sin_cache(OBS_PARQUET)
 historico = cargar_historico_pronosticos()
-predicciones_306090 = cargar_predicciones_306090()
+predicciones_306090 = cargar_predicciones_306090(
+    fuente="Análogos de estado (vigente)"
+)
+predicciones_306090_dtw = cargar_predicciones_306090(
+    parquet_path=PREDICCIONES_306090_DTW_PARQUET,
+    csv_path=PREDICCIONES_306090_DTW_CSV,
+    fuente="Análogos DTW (experimental)",
+)
 resumen_306090 = cargar_resumen_306090()
 
 if "nivel_m" in obs.columns:
@@ -2301,16 +2319,29 @@ if vista_principal == "Pronóstico DWLT":
                 graficar_validacion_historica(hist_est=hist_est, obs_est=obs_est)
 
 else:
-    if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
-        nombres_306090 = set(predicciones_306090["estacion"].apply(normalizar_texto).dropna())
+    metodo_306090 = st.radio(
+        "Método de análogos",
+        ["Análogos de estado (vigente)", "Análogos DTW (experimental)"],
+        horizontal=True,
+        key="metodo_306090",
+        label_visibility="visible",
+    )
+    predicciones_306090_vista = (
+        predicciones_306090_dtw
+        if metodo_306090 == "Análogos DTW (experimental)"
+        else predicciones_306090
+    )
+
+    if not predicciones_306090_vista.empty and "estacion" in predicciones_306090_vista.columns:
+        nombres_306090 = set(predicciones_306090_vista["estacion"].apply(normalizar_texto).dropna())
         estaciones_mapa_306090 = estaciones[
             estaciones["estacion"].apply(normalizar_texto).isin(nombres_306090)
         ].copy()
         estacion_sel_norm = normalizar_texto(estacion_sel)
-        mask_estacion_306090 = predicciones_306090["estacion"].apply(
+        mask_estacion_306090 = predicciones_306090_vista["estacion"].apply(
             normalizar_texto
         ) == estacion_sel_norm
-        pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
+        pred_306090_est = predicciones_306090_vista[mask_estacion_306090].copy()
     else:
         estaciones_mapa_306090 = pd.DataFrame()
         pred_306090_est = pd.DataFrame()
@@ -2341,7 +2372,14 @@ else:
             unsafe_allow_html=True,
         )
         st.caption(
-            "Pronóstico independiente de DWLT. La salida vigente se actualiza diariamente "
-            "a partir de los datos de HidroMet y conserva solo la emisión actual."
+            f"Método seleccionado: {metodo_306090}. Pronóstico independiente de DWLT. "
+            "La salida se actualiza diariamente a partir de los datos de HidroMet y "
+            "conserva solo la emisión actual."
         )
-        graficar_pronostico_306090(pred_est=pred_306090_est, obs_est=obs_est)
+        if pred_306090_est.empty:
+            st.warning(
+                "No hay una emisión vigente para este método. Ejecuta el actualizador "
+                "diario y vuelve a cargar el visor."
+            )
+        else:
+            graficar_pronostico_306090(pred_est=pred_306090_est, obs_est=obs_est)

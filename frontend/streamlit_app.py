@@ -2071,14 +2071,49 @@ tabla_estaciones_pron["comid"] = tabla_estaciones_pron["comid"].astype("int64")
 estacion_a_comid = dict(zip(tabla_estaciones_pron["estacion"], tabla_estaciones_pron["comid"]))
 comid_a_estacion = dict(zip(tabla_estaciones_pron["comid"], tabla_estaciones_pron["estacion"]))
 
+if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
+    estaciones_306090_norm = set(
+        predicciones_306090["estacion"].apply(normalizar_texto).dropna()
+    )
+    estaciones_306090_disponibles = [
+        estacion
+        for estacion in estaciones_disponibles
+        if normalizar_texto(estacion) in estaciones_306090_norm
+    ]
+else:
+    estaciones_306090_disponibles = []
+
+if hasattr(st, "segmented_control"):
+    vista_principal = st.segmented_control(
+        "Vista del visor",
+        options=["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
+        default="Pronóstico DWLT",
+        key="vista_principal",
+        label_visibility="collapsed",
+    )
+else:
+    vista_principal = st.radio(
+        "Vista del visor",
+        ["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
+        horizontal=True,
+        key="vista_principal",
+        label_visibility="collapsed",
+    )
+
+estaciones_selector = (
+    estaciones_306090_disponibles
+    if vista_principal == "Pronóstico 30 / 60 / 90" and estaciones_306090_disponibles
+    else estaciones_disponibles
+)
+
 if "estacion_sel" not in st.session_state:
-    st.session_state.estacion_sel = estaciones_disponibles[0]
+    st.session_state.estacion_sel = estaciones_selector[0]
 
 if "ultimo_click_comid" not in st.session_state:
     st.session_state.ultimo_click_comid = None
 
-if st.session_state.estacion_sel not in estaciones_disponibles:
-    st.session_state.estacion_sel = estaciones_disponibles[0]
+if st.session_state.estacion_sel not in estaciones_selector:
+    st.session_state.estacion_sel = estaciones_selector[0]
 
 
 # ============================================================
@@ -2096,11 +2131,11 @@ with st.sidebar:
         ],
     )
 
-    index_actual = estaciones_disponibles.index(st.session_state.estacion_sel)
+    index_actual = estaciones_selector.index(st.session_state.estacion_sel)
 
     estacion_sidebar = st.selectbox(
         "Estación",
-        estaciones_disponibles,
+        estaciones_selector,
         index=index_actual,
         key="selector_estacion_sidebar",
     )
@@ -2175,9 +2210,7 @@ if comid_sel is not None:
 # LAYOUT POR PESTAÑA
 # ============================================================
 
-tab_dwlt, tab_306090 = st.tabs(["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"])
-
-with tab_dwlt:
+if vista_principal == "Pronóstico DWLT":
     col_mapa_dwlt, col_panel_dwlt = st.columns([0.95, 2.05], gap="large")
 
     with col_mapa_dwlt:
@@ -2274,7 +2307,7 @@ with tab_dwlt:
             else:
                 graficar_validacion_historica(hist_est=hist_est, obs_est=obs_est)
 
-with tab_306090:
+else:
     if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
         nombres_306090 = set(predicciones_306090["estacion"].apply(normalizar_texto).dropna())
         estaciones_mapa_306090 = estaciones[

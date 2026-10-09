@@ -1722,8 +1722,9 @@ def preparar_observado_con_brechas(
 def graficar_pronostico_306090(
     pred_est: pd.DataFrame,
     obs_est: pd.DataFrame,
+    pred_dtw_est: pd.DataFrame | None = None,
 ) -> None:
-    """Renderiza el pronóstico de análogos vigente para 30, 60 o 90 días."""
+    """Renderiza el método vigente y DTW como líneas comparables."""
     if pred_est.empty:
         st.warning(
             "No hay un pronóstico 30/60/90 vigente para esta estación. "
@@ -1755,6 +1756,20 @@ def graficar_pronostico_306090(
 
     pred_sel = pred_est[pred_est["horizonte_dias"] == horizonte_sel].copy()
     pred_sel = pred_sel.sort_values("fecha_pronostico").copy()
+
+    dtw_sel = pd.DataFrame()
+    if pred_dtw_est is not None and not pred_dtw_est.empty:
+        dtw_tmp = pred_dtw_est.copy()
+        dtw_tmp["horizonte_dias"] = pd.to_numeric(
+            dtw_tmp["horizonte_dias"], errors="coerce"
+        )
+        dtw_tmp = dtw_tmp.dropna(subset=["horizonte_dias"]).copy()
+        dtw_tmp["horizonte_dias"] = dtw_tmp["horizonte_dias"].astype(int)
+        dtw_sel = dtw_tmp[dtw_tmp["horizonte_dias"] == horizonte_sel].copy()
+        dtw_sel = dtw_sel.sort_values("fecha_pronostico").copy()
+        col_dtw = "nivel_hibrido_m" if "nivel_hibrido_m" in dtw_sel.columns else "nivel_pronosticado_m"
+        if col_dtw in dtw_sel.columns:
+            dtw_sel["nivel_dtw_m"] = pd.to_numeric(dtw_sel[col_dtw], errors="coerce")
 
     if pred_sel.empty:
         st.warning(f"No hay datos para el horizonte de {horizonte_sel} días.")
@@ -1850,6 +1865,31 @@ def graficar_pronostico_306090(
                 )
             )
 
+    # Continuidad visual de la variante DTW; no modifica ninguna serie.
+    dtw_estado = (
+        str(dtw_sel["estado"].dropna().iloc[0])
+        if "estado" in dtw_sel and dtw_sel["estado"].notna().any()
+        else ""
+    )
+    dtw_excluida = "EXCLUIDA" in normalizar_texto(dtw_estado)
+    if not dtw_sel.empty and "nivel_dtw_m" in dtw_sel.columns and not dtw_excluida:
+        dtw_tmp = dtw_sel.dropna(subset=["fecha_pronostico", "nivel_dtw_m"]).copy()
+        obs_tmp = obs_plot.dropna(subset=["fecha", "nivel_m"]).copy() if "obs_plot" in locals() else pd.DataFrame()
+        if not dtw_tmp.empty and not obs_tmp.empty and not pd.isna(fecha_origen):
+            ultimo_obs = obs_tmp.sort_values("fecha").iloc[-1]
+            primer_dtw = dtw_tmp.sort_values("fecha_pronostico").iloc[0]
+            fig.add_trace(
+                go.Scatter(
+                    x=[ultimo_obs["fecha"], primer_dtw["fecha_pronostico"]],
+                    y=[ultimo_obs["nivel_m"], primer_dtw["nivel_dtw_m"]],
+                    mode="lines",
+                    name="Continuidad observado–DTW",
+                    line=dict(width=1.5, color="#f97316", dash="dot"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
     if "p90_m" in pred_sel.columns and "p10_m" in pred_sel.columns:
         fig.add_trace(
             go.Scatter(
@@ -1888,6 +1928,19 @@ def graficar_pronostico_306090(
             connectgaps=False,
         )
     )
+
+    if not dtw_sel.empty and "nivel_dtw_m" in dtw_sel.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=dtw_sel["fecha_pronostico"],
+                y=dtw_sel["nivel_dtw_m"],
+                mode="lines+markers",
+                name="Pronóstico DTW (experimental)",
+                line=dict(width=2.5, color="#f97316", dash="dash"),
+                marker=dict(size=4, color="#f97316"),
+                connectgaps=False,
+            )
+        )
 
     if "nivel_analogos_m" in pred_sel.columns:
         fig.add_trace(
@@ -1938,7 +1991,8 @@ def graficar_pronostico_306090(
     st.caption(
         "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
         "La línea punteada une visualmente el último observado con el primer pronóstico. "
-        "La línea azul es el pronóstico; la banda representa P10–P90."
+        "La línea azul es el método vigente, la línea naranja discontinua es DTW experimental "
+        "y la banda azul representa P10–P90 del método vigente."
     )
 
     st.markdown('<div class="section-title">Comparación de los tres horizontes</div>', unsafe_allow_html=True)
@@ -2319,32 +2373,27 @@ if vista_principal == "Pronóstico DWLT":
                 graficar_validacion_historica(hist_est=hist_est, obs_est=obs_est)
 
 else:
-    metodo_306090 = st.radio(
-        "Método de análogos",
-        ["Análogos de estado (vigente)", "Análogos DTW (experimental)"],
-        horizontal=True,
-        key="metodo_306090",
-        label_visibility="visible",
-    )
-    predicciones_306090_vista = (
-        predicciones_306090_dtw
-        if metodo_306090 == "Análogos DTW (experimental)"
-        else predicciones_306090
-    )
-
-    if not predicciones_306090_vista.empty and "estacion" in predicciones_306090_vista.columns:
-        nombres_306090 = set(predicciones_306090_vista["estacion"].apply(normalizar_texto).dropna())
+    if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
+        nombres_306090 = set(predicciones_306090["estacion"].apply(normalizar_texto).dropna())
         estaciones_mapa_306090 = estaciones[
             estaciones["estacion"].apply(normalizar_texto).isin(nombres_306090)
         ].copy()
         estacion_sel_norm = normalizar_texto(estacion_sel)
-        mask_estacion_306090 = predicciones_306090_vista["estacion"].apply(
+        mask_estacion_306090 = predicciones_306090["estacion"].apply(
             normalizar_texto
         ) == estacion_sel_norm
-        pred_306090_est = predicciones_306090_vista[mask_estacion_306090].copy()
+        pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
+        if not predicciones_306090_dtw.empty and "estacion" in predicciones_306090_dtw.columns:
+            mask_estacion_dtw = predicciones_306090_dtw["estacion"].apply(
+                normalizar_texto
+            ) == estacion_sel_norm
+            pred_306090_dtw_est = predicciones_306090_dtw[mask_estacion_dtw].copy()
+        else:
+            pred_306090_dtw_est = pd.DataFrame()
     else:
         estaciones_mapa_306090 = pd.DataFrame()
         pred_306090_est = pd.DataFrame()
+        pred_306090_dtw_est = pd.DataFrame()
 
     col_mapa_306090, col_panel_306090 = st.columns([0.95, 2.05], gap="large")
 
@@ -2372,9 +2421,9 @@ else:
             unsafe_allow_html=True,
         )
         st.caption(
-            f"Método seleccionado: {metodo_306090}. Pronóstico independiente de DWLT. "
-            "La salida se actualiza diariamente a partir de los datos de HidroMet y "
-            "conserva solo la emisión actual."
+            "Pronóstico independiente de DWLT. La línea azul corresponde al método vigente "
+            "y la naranja a DTW experimental; ambas salidas se actualizan diariamente "
+            "a partir de los datos de HidroMet."
         )
         if pred_306090_est.empty:
             st.warning(
@@ -2382,4 +2431,8 @@ else:
                 "diario y vuelve a cargar el visor."
             )
         else:
-            graficar_pronostico_306090(pred_est=pred_306090_est, obs_est=obs_est)
+            graficar_pronostico_306090(
+                pred_est=pred_306090_est,
+                pred_dtw_est=pred_306090_dtw_est,
+                obs_est=obs_est,
+            )

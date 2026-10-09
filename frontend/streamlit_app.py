@@ -38,6 +38,11 @@ DIAGNOSTICO_CSV = OUTPUT_DIR / "diagnostico_ajuste_continuidad.csv"
 METRICAS_PARQUET = OUTPUT_DIR / "metricas_dwlt_estaciones.parquet"
 OBS_PARQUET = CACHE_DIR / "observado_estaciones.parquet"
 
+PREDICCIONES_306090_DIR = BASE_DIR / "backend" / "predicciones_30_60_90" / "output"
+PREDICCIONES_306090_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_actual.parquet"
+PREDICCIONES_306090_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_actual.csv"
+RESUMEN_306090_CSV = PREDICCIONES_306090_DIR / "resumen_pronostico_30_60_90.csv"
+
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
 
 SELLO_FILES = [
@@ -381,6 +386,9 @@ def convertir_fechas(df: pd.DataFrame) -> pd.DataFrame:
         "fecha_obs_ajuste",
         "fecha_emision_pronostico",
         "fecha_ejecucion_workflow",
+        "fecha_emision",
+        "fecha_origen",
+        "fecha_pronostico",
     ]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -769,6 +777,86 @@ def cargar_historico_pronosticos() -> pd.DataFrame:
         return hist
 
     return pd.DataFrame()
+
+
+def cargar_predicciones_306090() -> pd.DataFrame:
+    """Carga el resultado vigente del backend de pronósticos 30/60/90.
+
+    Se utiliza Parquet como fuente preferida y CSV como respaldo. El archivo
+    contiene únicamente la emisión vigente, por lo que esta pestaña no mezcla
+    ejecuciones anteriores ni modifica los archivos de DWLT.
+    """
+    path = PREDICCIONES_306090_PARQUET
+    try:
+        if path.exists():
+            df = pd.read_parquet(path)
+        elif PREDICCIONES_306090_CSV.exists():
+            df = pd.read_csv(PREDICCIONES_306090_CSV)
+        else:
+            return pd.DataFrame()
+
+        df = normalizar_columnas(df)
+        df = convertir_fechas(df)
+        df = convertir_comid(df)
+
+        for col in [
+            "horizonte_dias",
+            "dia_adelante",
+            "n_analogos",
+            "ventana_analogos_dias",
+        ]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        for col in [
+            "nivel_pronosticado_m",
+            "nivel_analogos_m",
+            "nivel_hibrido_m",
+            "nivel_persistencia_m",
+            "nivel_climatologia_m",
+            "p10_m",
+            "p90_m",
+            "distancia_media",
+        ]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        if "estacion" in df.columns:
+            df["estacion"] = df["estacion"].astype(str).str.strip()
+
+        return df
+
+    except Exception as e:
+        st.warning(f"No se pudo leer el pronóstico 30/60/90: {e}")
+        return pd.DataFrame()
+
+
+def cargar_resumen_306090() -> pd.DataFrame:
+    """Carga el resumen de trazabilidad por estación y horizonte."""
+    if not RESUMEN_306090_CSV.exists():
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(RESUMEN_306090_CSV)
+        df = normalizar_columnas(df)
+        df = convertir_fechas(df)
+        df = convertir_comid(df)
+
+        for col in [
+            "n_datos",
+            "horizonte_dias",
+            "n_analogos",
+            "ventana_analogos_dias",
+            "distancia_media",
+        ]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        return df
+
+    except Exception as e:
+        st.warning(f"No se pudo leer el resumen 30/60/90: {e}")
+        return pd.DataFrame()
 
 
 # ============================================================
@@ -1532,6 +1620,293 @@ def graficar_validacion_historica(
     )
 
 
+def preparar_observado_con_brechas(
+    obs_est: pd.DataFrame,
+    fecha_inicio: pd.Timestamp,
+    fecha_fin: pd.Timestamp,
+    dias_previos: int = 30,
+) -> pd.DataFrame:
+    """Prepara observado diario manteniendo las fechas faltantes como NaN."""
+    obs_d = observado_diario(obs_est)
+
+    if obs_d.empty or pd.isna(fecha_inicio) or pd.isna(fecha_fin):
+        return pd.DataFrame()
+
+    fecha_inicio = pd.to_datetime(fecha_inicio).normalize()
+    fecha_fin = pd.to_datetime(fecha_fin).normalize()
+    fecha_min = fecha_inicio - pd.Timedelta(days=dias_previos)
+
+    obs_d = obs_d[
+        (obs_d["fecha"] >= fecha_min)
+        & (obs_d["fecha"] <= fecha_inicio)
+    ].copy()
+
+    if obs_d.empty:
+        return pd.DataFrame()
+
+    calendario = pd.date_range(fecha_min, fecha_inicio, freq="D")
+    obs_d = (
+        obs_d.set_index("fecha")
+        .reindex(calendario)
+        .rename_axis("fecha")
+        .reset_index()
+    )
+
+    return obs_d
+
+
+def graficar_pronostico_306090(
+    pred_est: pd.DataFrame,
+    obs_est: pd.DataFrame,
+) -> None:
+    """Renderiza el pronóstico de análogos vigente para 30, 60 o 90 días."""
+    if pred_est.empty:
+        st.warning(
+            "No hay un pronóstico 30/60/90 vigente para esta estación. "
+            "Ejecuta el actualizador y el predictor antes de volver a cargar el visor."
+        )
+        return
+
+    pred_est = pred_est.copy()
+    pred_est["horizonte_dias"] = pd.to_numeric(
+        pred_est["horizonte_dias"], errors="coerce"
+    )
+    pred_est = pred_est.dropna(subset=["horizonte_dias"]).copy()
+    pred_est["horizonte_dias"] = pred_est["horizonte_dias"].astype(int)
+    pred_est = pred_est.sort_values(["horizonte_dias", "fecha_pronostico"])
+
+    horizontes = [h for h in [30, 60, 90] if h in pred_est["horizonte_dias"].unique()]
+    if not horizontes:
+        st.warning("El archivo no contiene horizontes 30, 60 o 90 días.")
+        return
+
+    horizonte_sel = st.radio(
+        "Horizonte que se mostrará en el gráfico",
+        horizontes,
+        index=0,
+        horizontal=True,
+        format_func=lambda h: f"{h} días",
+        key="selector_horizonte_306090",
+    )
+
+    pred_sel = pred_est[pred_est["horizonte_dias"] == horizonte_sel].copy()
+    pred_sel = pred_sel.sort_values("fecha_pronostico").copy()
+
+    if pred_sel.empty:
+        st.warning(f"No hay datos para el horizonte de {horizonte_sel} días.")
+        return
+
+    fecha_emision = pred_sel["fecha_emision"].dropna().iloc[0] if "fecha_emision" in pred_sel and pred_sel["fecha_emision"].notna().any() else pd.NaT
+    fecha_origen = pred_sel["fecha_origen"].dropna().iloc[0] if "fecha_origen" in pred_sel and pred_sel["fecha_origen"].notna().any() else pd.NaT
+    estado = str(pred_sel["estado"].dropna().iloc[0]) if "estado" in pred_sel and pred_sel["estado"].notna().any() else "SIN_ESTADO"
+    modelo = str(pred_sel["modelo"].dropna().iloc[0]) if "modelo" in pred_sel and pred_sel["modelo"].notna().any() else "Sin dato"
+
+    col_principal = "nivel_hibrido_m" if "nivel_hibrido_m" in pred_sel.columns else "nivel_pronosticado_m"
+    pred_sel["nivel_principal_m"] = pd.to_numeric(pred_sel[col_principal], errors="coerce")
+
+    ultimos = pred_sel.dropna(subset=["nivel_principal_m"])
+    ultimo = ultimos.iloc[-1] if not ultimos.empty else pd.Series(dtype=object)
+
+    nivel_final = ultimo.get("nivel_principal_m", np.nan)
+    p10_final = ultimo.get("p10_m", np.nan)
+    p90_final = ultimo.get("p90_m", np.nan)
+    n_analogos = pred_sel["n_analogos"].dropna().iloc[0] if "n_analogos" in pred_sel and pred_sel["n_analogos"].notna().any() else np.nan
+    distancia = pred_sel["distancia_media"].dropna().iloc[0] if "distancia_media" in pred_sel and pred_sel["distancia_media"].notna().any() else np.nan
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric(
+        "Nivel al final del horizonte",
+        f"{formato_num(nivel_final)} m",
+        f"H+{horizonte_sel}",
+    )
+    k2.metric(
+        "Intervalo P10–P90",
+        f"{formato_num(p10_final)}–{formato_num(p90_final)} m",
+    )
+    k3.metric("Análogos utilizados", formato_num(n_analogos, 0))
+    k4.metric("Distancia media", formato_num(distancia, 3))
+
+    estado_normalizado = normalizar_texto(estado)
+    mensaje_estado = f"Estado del horizonte H+{horizonte_sel}: **{estado}** · Modelo: `{modelo}`"
+    if "OK" in estado_normalizado:
+        st.success(mensaje_estado)
+    elif "FALLBACK" in estado_normalizado:
+        st.warning(mensaje_estado)
+    else:
+        st.info(mensaje_estado)
+
+    st.markdown(
+        f'<div class="section-title">Nivel observado y pronóstico por análogos — horizonte de {horizonte_sel} días</div>',
+        unsafe_allow_html=True,
+    )
+
+    fig = go.Figure()
+
+    if not pd.isna(fecha_origen):
+        obs_plot = preparar_observado_con_brechas(
+            obs_est=obs_est,
+            fecha_inicio=fecha_origen,
+            fecha_fin=pred_sel["fecha_pronostico"].max(),
+        )
+        if not obs_plot.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=obs_plot["fecha"],
+                    y=obs_plot["nivel_m"],
+                    mode="lines+markers",
+                    name="Observado",
+                    line=dict(width=3, color="#111827"),
+                    marker=dict(size=6, color="#111827"),
+                    connectgaps=False,
+                )
+            )
+
+    if "p90_m" in pred_sel.columns and "p10_m" in pred_sel.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pred_sel["fecha_pronostico"],
+                y=pred_sel["p90_m"],
+                mode="lines",
+                name="P90",
+                line=dict(width=0, color="rgba(37,99,235,0)"),
+                showlegend=False,
+                hoverinfo="skip",
+                connectgaps=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=pred_sel["fecha_pronostico"],
+                y=pred_sel["p10_m"],
+                mode="lines",
+                name="Intervalo P10–P90",
+                fill="tonexty",
+                fillcolor="rgba(37,99,235,0.16)",
+                line=dict(width=0, color="rgba(37,99,235,0)"),
+                connectgaps=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=pred_sel["fecha_pronostico"],
+            y=pred_sel["nivel_principal_m"],
+            mode="lines+markers",
+            name="Pronóstico híbrido",
+            line=dict(width=3, color="#2563eb"),
+            marker=dict(size=5, color="#2563eb"),
+            connectgaps=False,
+        )
+    )
+
+    if "nivel_analogos_m" in pred_sel.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=pred_sel["fecha_pronostico"],
+                y=pred_sel["nivel_analogos_m"],
+                mode="lines",
+                name="Componente de análogos",
+                line=dict(width=1.5, color="#0f766e", dash="dot"),
+                visible="legendonly",
+                connectgaps=False,
+            )
+        )
+
+    if not pd.isna(fecha_origen):
+        fig.add_shape(
+            type="line",
+            x0=fecha_origen,
+            x1=fecha_origen,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line=dict(color="#64748b", width=2, dash="dash"),
+        )
+        fig.add_annotation(
+            x=fecha_origen,
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Origen",
+            showarrow=False,
+            yanchor="bottom",
+            font=dict(size=11, color="#475569"),
+        )
+
+    fig.update_layout(
+        height=470,
+        margin=dict(l=20, r=16, t=24, b=18),
+        xaxis_title="Fecha",
+        yaxis_title="Nivel del río (m)",
+        legend_title="Serie",
+        hovermode="x unified",
+        font=dict(size=11),
+        legend=dict(font=dict(size=10), title_font=dict(size=10)),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
+        "La línea azul es el pronóstico; la banda representa P10–P90."
+    )
+
+    st.markdown('<div class="section-title">Comparación de los tres horizontes</div>', unsafe_allow_html=True)
+    tarjetas = st.columns(3)
+    for tarjeta, horizonte in zip(tarjetas, [30, 60, 90]):
+        tmp = pred_est[pred_est["horizonte_dias"] == horizonte].sort_values("fecha_pronostico")
+        if tmp.empty:
+            tarjeta.info(f"H+{horizonte}: sin datos")
+            continue
+        tmp = tmp.copy()
+        col_tmp = "nivel_hibrido_m" if "nivel_hibrido_m" in tmp.columns else "nivel_pronosticado_m"
+        tmp[col_tmp] = pd.to_numeric(tmp[col_tmp], errors="coerce")
+        tmp_ok = tmp.dropna(subset=[col_tmp])
+        fin = tmp_ok.iloc[-1] if not tmp_ok.empty else pd.Series(dtype=object)
+        estado_tmp = str(tmp["estado"].dropna().iloc[0]) if "estado" in tmp and tmp["estado"].notna().any() else "Sin dato"
+        tarjeta.metric(f"H+{horizonte}", f"{formato_num(fin.get(col_tmp, np.nan))} m")
+        tarjeta.caption(
+            f"P10–P90: {formato_num(fin.get('p10_m', np.nan))}–{formato_num(fin.get('p90_m', np.nan))} m\n\n"
+            f"Estado: {estado_tmp}"
+        )
+
+    tabla = []
+    for horizonte in [30, 60, 90]:
+        tmp = pred_est[pred_est["horizonte_dias"] == horizonte].sort_values("fecha_pronostico")
+        if tmp.empty:
+            continue
+        col_tmp = "nivel_hibrido_m" if "nivel_hibrido_m" in tmp.columns else "nivel_pronosticado_m"
+        tmp_ok = tmp.dropna(subset=[col_tmp])
+        fin = tmp_ok.iloc[-1] if not tmp_ok.empty else tmp.iloc[-1]
+        tabla.append(
+            {
+                "Horizonte": f"H+{horizonte}",
+                "Fecha final": pd.to_datetime(fin.get("fecha_pronostico"), errors="coerce"),
+                "Nivel final (m)": fin.get(col_tmp, np.nan),
+                "P10 (m)": fin.get("p10_m", np.nan),
+                "P90 (m)": fin.get("p90_m", np.nan),
+                "Análogos": fin.get("n_analogos", np.nan),
+                "Estado": fin.get("estado", "Sin dato"),
+            }
+        )
+    if tabla:
+        st.dataframe(pd.DataFrame(tabla), use_container_width=True, hide_index=True)
+
+    with st.expander("Trazabilidad del cálculo"):
+        trazabilidad = {
+            "Fecha de emisión": fecha_emision.strftime("%d/%m/%Y") if not pd.isna(fecha_emision) else "Sin dato",
+            "Fecha de origen": fecha_origen.strftime("%d/%m/%Y") if not pd.isna(fecha_origen) else "Sin dato",
+            "Método": pred_sel["metodo"].dropna().iloc[0] if "metodo" in pred_sel and pred_sel["metodo"].notna().any() else "Sin dato",
+            "Ventana de análogos (días)": pred_sel["ventana_analogos_dias"].dropna().iloc[0] if "ventana_analogos_dias" in pred_sel and pred_sel["ventana_analogos_dias"].notna().any() else np.nan,
+            "N.º de datos usados": pred_sel["n_datos"].dropna().iloc[0] if "n_datos" in pred_sel and pred_sel["n_datos"].notna().any() else "No incluido en salida",
+        }
+        st.dataframe(pd.DataFrame([trazabilidad]), use_container_width=True, hide_index=True)
+        st.caption(
+            "Esta vista consume únicamente la emisión vigente del backend 30/60/90. "
+            "El pronóstico es operativo experimental hasta completar su validación independiente por estación."
+        )
+
+
 # ============================================================
 # CARGA PRINCIPAL
 # ============================================================
@@ -1542,6 +1917,8 @@ diagnostico = cargar_csv_sin_cache(DIAGNOSTICO_CSV)
 metricas = cargar_parquet_sin_cache(METRICAS_PARQUET)
 obs = cargar_parquet_sin_cache(OBS_PARQUET)
 historico = cargar_historico_pronosticos()
+predicciones_306090 = cargar_predicciones_306090()
+resumen_306090 = cargar_resumen_306090()
 
 if "nivel_m" in obs.columns:
     obs["nivel_m"] = pd.to_numeric(obs["nivel_m"], errors="coerce")
@@ -1687,6 +2064,7 @@ with st.sidebar:
         "métricas Parquet": not metricas.empty,
         "observado Parquet": not obs.empty,
         "histórico pronósticos AH": historico_ok,
+        "pronósticos 30/60/90": not predicciones_306090.empty,
     }
 
     for nombre, ok in checks.items():
@@ -1811,90 +2189,107 @@ with col_panel:
         unsafe_allow_html=True,
     )
 
-    if modo == "Pronóstico actual":
-        nivel_obs_reciente = None
+    tab_dwlt, tab_306090 = st.tabs(["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"])
 
-        obs_d = observado_diario(obs_est)
+    with tab_dwlt:
+        if modo == "Pronóstico actual":
+            nivel_obs_reciente = None
 
-        if not obs_d.empty:
-            nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
+            obs_d = observado_diario(obs_est)
 
-        nivel_inicio = None
-        nivel_fin = None
-        tendencia_val = None
+            if not obs_d.empty:
+                nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
 
-        if not pron_est.empty:
-            serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
+            nivel_inicio = None
+            nivel_fin = None
+            tendencia_val = None
 
-            if not serie_prom.empty:
-                nivel_inicio = serie_prom.iloc[0]
-                nivel_fin = serie_prom.iloc[-1]
-                tendencia_val = nivel_fin - nivel_inicio
+            if not pron_est.empty:
+                serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
 
-        k1, k2, k3 = st.columns(3)
+                if not serie_prom.empty:
+                    nivel_inicio = serie_prom.iloc[0]
+                    nivel_fin = serie_prom.iloc[-1]
+                    tendencia_val = nivel_fin - nivel_inicio
 
-        k1.metric(
-            "Nivel observado reciente",
-            f"{formato_num(nivel_obs_reciente)} m",
-        )
+            k1, k2, k3 = st.columns(3)
 
-        k2.metric(
-            "Nivel pronosticado ajustado",
-            f"{formato_num(nivel_fin)} m",
-        )
-
-        tendencia_txt = clasificar_tendencia(tendencia_val)
-
-        if tendencia_val is None or pd.isna(tendencia_val):
-            tendencia_color = "#64748b"
-            tendencia_flecha = ""
-            tendencia_delta = ""
-        elif tendencia_val > 0:
-            tendencia_color = "#16a34a"
-            tendencia_flecha = "↑"
-            tendencia_delta = f"{formato_num(tendencia_val)} m"
-        elif tendencia_val < 0:
-            tendencia_color = "#dc2626"
-            tendencia_flecha = "↓"
-            tendencia_delta = f"{formato_num(abs(tendencia_val))} m"
-        else:
-            tendencia_color = "#2563eb"
-            tendencia_flecha = "→"
-            tendencia_delta = f"{formato_num(tendencia_val)} m"
-
-        with k3:
-            st.markdown(
-                f"""
-                <div class="stMetric">
-                    <div style="font-size:0.78rem;color:#334155;font-weight:600;line-height:1.15;">
-                        Tendencia esperada
-                    </div>
-                    <div style="font-size:1.15rem;font-weight:800;color:#0f172a;line-height:1.20;margin-top:6px;">
-                        {tendencia_txt}
-                        <span style="color:{tendencia_color};font-size:0.78rem;font-weight:800;margin-left:8px;white-space:nowrap;">
-                            {tendencia_flecha} {tendencia_delta}
-                        </span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            k1.metric(
+                "Nivel observado reciente",
+                f"{formato_num(nivel_obs_reciente)} m",
             )
 
-        graficar_pronostico_actual(
-            pron_est=pron_est,
-            obs_est=obs_est,
-        )
+            k2.metric(
+                "Nivel pronosticado ajustado",
+                f"{formato_num(nivel_fin)} m",
+            )
 
-    else:
-        st.info(
-            "Modo de validación histórica: selecciona una fecha de emisión para comparar "
-            "el pronóstico guardado contra el nivel observado real."
-        )
+            tendencia_txt = clasificar_tendencia(tendencia_val)
 
-        if not historico_ok:
-            st.warning("Todavía no existe archivo histórico. Ejecuta el workflow actualizado.")
-        else:
-            graficar_validacion_historica(
-                hist_est=hist_est,
+            if tendencia_val is None or pd.isna(tendencia_val):
+                tendencia_color = "#64748b"
+                tendencia_flecha = ""
+                tendencia_delta = ""
+            elif tendencia_val > 0:
+                tendencia_color = "#16a34a"
+                tendencia_flecha = "↑"
+                tendencia_delta = f"{formato_num(tendencia_val)} m"
+            elif tendencia_val < 0:
+                tendencia_color = "#dc2626"
+                tendencia_flecha = "↓"
+                tendencia_delta = f"{formato_num(abs(tendencia_val))} m"
+            else:
+                tendencia_color = "#2563eb"
+                tendencia_flecha = "→"
+                tendencia_delta = f"{formato_num(tendencia_val)} m"
+
+            with k3:
+                st.markdown(
+                    f"""
+                    <div class="stMetric">
+                        <div style="font-size:0.78rem;color:#334155;font-weight:600;line-height:1.15;">
+                            Tendencia esperada
+                        </div>
+                        <div style="font-size:1.15rem;font-weight:800;color:#0f172a;line-height:1.20;margin-top:6px;">
+                            {tendencia_txt}
+                            <span style="color:{tendencia_color};font-size:0.78rem;font-weight:800;margin-left:8px;white-space:nowrap;">
+                                {tendencia_flecha} {tendencia_delta}
+                            </span>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            graficar_pronostico_actual(
+                pron_est=pron_est,
                 obs_est=obs_est,
             )
+
+        else:
+            st.info(
+                "Modo de validación histórica: selecciona una fecha de emisión para comparar "
+                "el pronóstico guardado contra el nivel observado real."
+            )
+
+            if not historico_ok:
+                st.warning("Todavía no existe archivo histórico. Ejecuta el workflow actualizado.")
+            else:
+                graficar_validacion_historica(
+                    hist_est=hist_est,
+                    obs_est=obs_est,
+                )
+
+    with tab_306090:
+        pred_306090_est = predicciones_306090[
+            predicciones_306090["estacion"] == estacion_sel
+        ].copy() if not predicciones_306090.empty and "estacion" in predicciones_306090.columns else pd.DataFrame()
+
+        st.caption(
+            "Pronóstico independiente de DWLT. La salida vigente se actualiza diariamente "
+            "a partir de los datos de HidroMet y conserva solo la emisión actual."
+        )
+        graficar_pronostico_306090(
+            pred_est=pred_306090_est,
+            obs_est=obs_est,
+        )

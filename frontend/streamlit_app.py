@@ -2281,9 +2281,14 @@ with col_panel:
                 )
 
     with tab_306090:
-        pred_306090_est = predicciones_306090[
-            predicciones_306090["estacion"] == estacion_sel
-        ].copy() if not predicciones_306090.empty and "estacion" in predicciones_306090.columns else pd.DataFrame()
+        if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
+            estacion_sel_norm = normalizar_texto(estacion_sel)
+            mask_estacion_306090 = predicciones_306090["estacion"].apply(
+                normalizar_texto
+            ) == estacion_sel_norm
+            pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
+        else:
+            pred_306090_est = pd.DataFrame()
 
         st.caption(
             "Pronóstico independiente de DWLT. La salida vigente se actualiza diariamente "

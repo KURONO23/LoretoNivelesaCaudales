@@ -176,7 +176,7 @@ def main() -> int:
                 bloque.loc[mask, "nivel_emos_m"] = emos
                 bloque.loc[mask, "estado_emos"] = "OK_CALIBRADO"
             else:
-                bloque.loc[mask, "nivel_emos_m"] = bloque.loc[mask, "nivel_hibrido_m"]
+                bloque.loc[mask, "nivel_emos_m"] = np.nan if es_enapu else bloque.loc[mask, "nivel_hibrido_m"]
                 bloque.loc[mask, "estado_emos"] = "EXCLUIDA_UNIDADES_MIXTAS" if es_enapu else "SIN_CALIBRACION_USA_VIGENTE"
             bloque.loc[mask, "peso_analogo"] = pesos[0]
             bloque.loc[mask, "peso_dtw"] = pesos[1]

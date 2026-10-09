@@ -1819,6 +1819,26 @@ def graficar_pronostico_306090(
                 )
             )
 
+    # Une visualmente el último dato observado con el primer pronóstico.
+    # La línea es solo gráfica: no rellena ni modifica los datos observados.
+    if "EXCLUIDA" not in estado_normalizado and not pd.isna(fecha_origen):
+        obs_tmp = obs_plot.dropna(subset=["fecha", "nivel_m"]).copy() if "obs_plot" in locals() else pd.DataFrame()
+        pred_tmp = pred_sel.dropna(subset=["fecha_pronostico", "nivel_principal_m"]).copy()
+        if not obs_tmp.empty and not pred_tmp.empty:
+            ultimo_obs = obs_tmp.sort_values("fecha").iloc[-1]
+            primer_pron = pred_tmp.sort_values("fecha_pronostico").iloc[0]
+            fig.add_trace(
+                go.Scatter(
+                    x=[ultimo_obs["fecha"], primer_pron["fecha_pronostico"]],
+                    y=[ultimo_obs["nivel_m"], primer_pron["nivel_principal_m"]],
+                    mode="lines",
+                    name="Continuidad observado-pronóstico",
+                    line=dict(width=2, color="#111827", dash="dot"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
     if "p90_m" in pred_sel.columns and "p10_m" in pred_sel.columns:
         fig.add_trace(
             go.Scatter(
@@ -1906,6 +1926,7 @@ def graficar_pronostico_306090(
     st.plotly_chart(fig, use_container_width=True)
     st.caption(
         "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
+        "La línea punteada une visualmente el último observado con el primer pronóstico. "
         "La línea azul es el pronóstico; la banda representa P10–P90."
     )
 

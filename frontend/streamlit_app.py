@@ -1037,14 +1037,17 @@ def crear_mapa_estaciones(
         mapa = folium.Map(
             location=[-5.0, -74.5],
             zoom_start=6,
-            tiles="CartoDB positron",
+            # OpenStreetMap no requiere una clave de API para el visor.
+            # CartoDB estaba devolviendo "API KEY REQUIRED" en producción.
+            tiles="OpenStreetMap",
             control_scale=True,
         )
     else:
         mapa = folium.Map(
             location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
             zoom_start=7,
-            tiles="CartoDB positron",
+            # Mantener el mismo proveedor en el encuadre normal y vacío.
+            tiles="OpenStreetMap",
             control_scale=True,
         )
 

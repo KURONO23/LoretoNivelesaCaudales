@@ -24,6 +24,14 @@ Este módulo es independiente del backend DWLT.
 
 El script no llama a `03_dwlt_todas_estaciones.py`, no escribe en `backend/cache/observado_estaciones.parquet` y no modifica `outputs/fore_nivel_transformado.parquet`. El futuro cálculo de análogos y horizontes 30/60/90 consumirá esta caché propia.
 
+## Control de continuidad
+
+El predictor ancla H+1 al último nivel observado mediante un desplazamiento
+constante que conserva la dinámica futura y el ancho del intervalo P10–P90.
+La corrección se registra en `correccion_continuidad_m` y
+`continuidad_estado`. ENAPU queda excluida (`EXCLUIDA_UNIDADES_MIXTAS`) porque
+combina cotas y tirantes; su salto no debe corregirse de forma automática.
+
 ## Automatización diaria
 
 `.github/workflows/predicciones_30_60_90.yml` ejecuta el actualizador a las 18:00 UTC (13:00 en Perú). Usa `PRED_DRIVE_FOLDER_ID` —o temporalmente `OBS_DRIVE_FOLDER_ID`— y `GOOGLE_SERVICE_JSON`. Esta Action no modifica el repositorio ni el flujo DWLT; actualiza directamente los mismos archivos de Drive.

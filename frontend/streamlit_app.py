@@ -1781,7 +1781,12 @@ def graficar_pronostico_306090(
 
     estado_normalizado = normalizar_texto(estado)
     mensaje_estado = f"Estado del horizonte H+{horizonte_sel}: **{estado}** · Modelo: `{modelo}`"
-    if "OK" in estado_normalizado:
+    if "EXCLUIDA" in estado_normalizado:
+        st.error(
+            mensaje_estado
+            + ". No se aplica corrección de continuidad porque la estación mezcla cotas y tirantes."
+        )
+    elif "OK" in estado_normalizado:
         st.success(mensaje_estado)
     elif "FALLBACK" in estado_normalizado:
         st.warning(mensaje_estado)

@@ -42,6 +42,7 @@ VENTANAS = (30, 60, 90)
 K = 10
 CANDIDATE_STRIDE = 14
 METODO = "ANALOGO_ESTADO_V2_HIBRIDO_CLIMATOLOGIA"
+ESTACIONES_SIN_CORRECCION_CONTINUIDAD = {"ENAPU"}
 
 
 def _metricas_basicas(observado: np.ndarray, predicho: np.ndarray) -> dict:
@@ -265,6 +266,36 @@ def pronosticar_estacion(
             estado = "OK_ANALOGOS"
             nivel_seleccionado = hibrido
 
+        salto_inicial_original = np.nan
+        correccion_continuidad = 0.0
+        salto_inicial_final = np.nan
+        continuidad_estado = "SIN_ANALOGOS"
+
+        if np.isfinite(a[origen_i]) and np.isfinite(nivel_seleccionado[0]):
+            salto_inicial_original = float(nivel_seleccionado[0] - a[origen_i])
+
+            if estacion.upper() in ESTACIONES_SIN_CORRECCION_CONTINUIDAD:
+                estado = "EXCLUIDA_UNIDADES_MIXTAS"
+                continuidad_estado = "NO_CORREGIDO_UNIDADES_MIXTAS"
+                salto_inicial_final = salto_inicial_original
+            elif mejor is None:
+                continuidad_estado = "PERSISTENCIA_CONTINUA"
+                salto_inicial_final = float(nivel_seleccionado[0] - a[origen_i])
+            else:
+                # Ancla el primer día del pronóstico al último observado.
+                # Se desplazan por igual la señal y la incertidumbre; la
+                # dinámica futura y el ancho P10–P90 se conservan.
+                correccion_continuidad = float(a[origen_i] - nivel_seleccionado[0])
+                analogos = analogos + correccion_continuidad
+                hibrido = hibrido + correccion_continuidad
+                p10 = p10 + correccion_continuidad
+                p90 = p90 + correccion_continuidad
+                clima = clima + correccion_continuidad
+                nivel_seleccionado = hibrido
+                estado = "OK_ANALOGOS_CONTINUIDAD_CORREGIDA"
+                continuidad_estado = "CORREGIDO_ANCLA_OBSERVADO"
+                salto_inicial_final = float(nivel_seleccionado[0] - a[origen_i])
+
         for plazo, fecha_pron in enumerate(fechas_futuras):
             filas.append(
                 {
@@ -288,6 +319,10 @@ def pronosticar_estacion(
                     "n_analogos": n_analogos,
                     "distancia_media": distancia_media,
                     "estado": estado,
+                    "salto_inicial_original_m": salto_inicial_original,
+                    "correccion_continuidad_m": correccion_continuidad,
+                    "salto_inicial_final_m": salto_inicial_final,
+                    "continuidad_estado": continuidad_estado,
                 }
             )
 
@@ -304,6 +339,10 @@ def pronosticar_estacion(
                 "n_analogos": n_analogos,
                 "ventana_analogos_dias": ventana_usada,
                 "distancia_media": distancia_media,
+                "salto_inicial_original_m": salto_inicial_original,
+                "correccion_continuidad_m": correccion_continuidad,
+                "salto_inicial_final_m": salto_inicial_final,
+                "continuidad_estado": continuidad_estado,
             }
         )
 

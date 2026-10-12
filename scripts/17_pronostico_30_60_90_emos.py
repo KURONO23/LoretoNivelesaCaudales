@@ -175,8 +175,13 @@ def main() -> int:
                 bloque.loc[mask, "nivel_emos_m"] = emos
                 bloque.loc[mask, "estado_emos"] = "OK_CALIBRADO"
             else:
-                bloque.loc[mask, "nivel_emos_m"] = bloque.loc[mask, "nivel_hibrido_m"]
-                bloque.loc[mask, "estado_emos"] = "SIN_CALIBRACION_USA_VIGENTE"
+                # Si aún no tiene suficientes ventanas retrospectivas completas de calibración,
+                # EMOS combina equitativamente los miembros disponibles (Híbrido + DTW + Climatología)
+                h_miembro = bloque.loc[mask, "nivel_hibrido_m"]
+                d_miembro = bloque.loc[mask, "nivel_hibrido_dtw_m"]
+                c_miembro = bloque.loc[mask, "nivel_climatologia_m"]
+                bloque.loc[mask, "nivel_emos_m"] = 0.45 * h_miembro + 0.45 * d_miembro + 0.10 * c_miembro
+                bloque.loc[mask, "estado_emos"] = "ENSAMBLE_EQUILIBRADO_SIN_CALIBRACION"
             bloque.loc[mask, "peso_analogo"] = pesos[0]
             bloque.loc[mask, "peso_dtw"] = pesos[1]
             bloque.loc[mask, "peso_persistencia"] = pesos[2]

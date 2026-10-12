@@ -109,6 +109,13 @@ COMID_MANUAL_OVERRIDES = {
     "SANTA MARÍA DE NANAY": 9037738,
 }
 
+# Fechas mínimas de descarga de API por estación.
+# Para ENAPU, HidroMet reporta cotas absolutas (~110-118 m en H10) hasta septiembre 2026.
+# En Drive ya está subsanado el histórico, por lo que la API solo debe consultar y completar a partir de octubre 2026.
+FECHA_MIN_API_POR_ESTACION = {
+    "ENAPU": "2026-10-01",
+}
+
 
 # ============================================================
 # UTILIDADES
@@ -359,10 +366,23 @@ def descargar_api_hidromet_formato_excel_estacion(
                 else:
                     df[col_h] = np.nan
 
+            # Control de calidad para ENAPU: los niveles de escala son < 25 m.
+            # En la API se enviaron cotas absolutas (> 50 m) en H10 o promedios.
+            if normalizar_texto(estacion_nombre) == "ENAPU":
+                for col_h in ["H6", "H10", "H14", "H18"]:
+                    df.loc[df[col_h] > 50, col_h] = np.nan
+
             if col_hprom is not None:
                 df["H_PROM"] = pd.to_numeric(raw_norm[col_hprom], errors="coerce")
+                if normalizar_texto(estacion_nombre) == "ENAPU":
+                    df.loc[df["H_PROM"] > 50, "H_PROM"] = np.nan
             else:
                 df["H_PROM"] = calcular_hprom_desde_horarias(df)
+
+            # Si H_PROM quedó vacío o nulo tras filtrar cotas absolutas, recalcular con horarias limpias
+            recalcular_mask = df["H_PROM"].isna()
+            if recalcular_mask.any():
+                df.loc[recalcular_mask, "H_PROM"] = calcular_hprom_desde_horarias(df.loc[recalcular_mask])
 
             df["ID_ESTACION"] = int(id_estacion)
             df["ESTACION_NOMBRE"] = estacion_nombre
@@ -423,12 +443,13 @@ def obtener_hidromet_api_todas(mapa_comid: dict[str, int]) -> pd.DataFrame:
     print(f"Periodo API: {OBS_API_START_DATE} a {OBS_API_END_DATE}")
 
     for id_estacion, estacion_nombre in ESTACIONES_API.items():
-        print(f"Descargando API: {estacion_nombre} | ID {id_estacion}")
+        fecha_ini_estacion = FECHA_MIN_API_POR_ESTACION.get(estacion_nombre, OBS_API_START_DATE)
+        print(f"Descargando API: {estacion_nombre} | ID {id_estacion} (desde {fecha_ini_estacion})")
 
         df_api_excel = descargar_api_hidromet_formato_excel_estacion(
             id_estacion=id_estacion,
             estacion_nombre=estacion_nombre,
-            fecha_ini=OBS_API_START_DATE,
+            fecha_ini=fecha_ini_estacion,
             fecha_fin=OBS_API_END_DATE,
         )
 
@@ -811,10 +832,14 @@ def consolidar_observados(partes: list[pd.DataFrame]) -> pd.DataFrame:
     df["estacion_nombre"] = df["estacion_nombre"].astype(str).str.strip()
     df["estacion_key"] = df["estacion_nombre"].apply(normalizar_texto)
 
+    # Para ENAPU, el Excel manual (Drive) tiene datos subsanados y gana sobre la API si coinciden fechas
+    es_enapu = df["estacion_key"].str.upper() == "ENAPU"
+    es_api = df["fuente"].astype(str).str.contains("HidroMet API", case=False, na=False)
+
     df["prioridad_fuente"] = np.where(
-        df["fuente"].astype(str).str.contains("HidroMet API", case=False, na=False),
-        2,
-        1,
+        es_enapu,
+        np.where(es_api, 1, 2),  # En ENAPU: Excel manual gana (2) sobre API (1)
+        np.where(es_api, 2, 1),  # En las demás: API gana (2) sobre manual (1)
     )
 
     df = df.sort_values(["comid", "fecha", "prioridad_fuente"]).copy()
@@ -901,12 +926,22 @@ def preparar_excel_antiguo_para_drive(
     combinado["FECHA_API"] = combinado["FECHA_API"].fillna("")
     combinado["ESTADO_FECHA"] = combinado["ESTADO_FECHA"].fillna("EXCEL_HISTORICO")
 
-    # API gana sobre Excel en fechas duplicadas
-    combinado["prioridad"] = np.where(
-        combinado["ESTADO_FECHA"].astype(str).str.contains("API|ORIGINAL|RECONSTRUIDA", case=False, na=False),
-        2,
-        1,
-    )
+    # En fechas duplicadas, para ENAPU (o estaciones con historico subsanado en Drive),
+    # el Excel existente tiene prioridad absoluta para no sobreescribir datos corregidos.
+    # Para nuevas fechas no existentes en el Excel, los datos de la API se integran normalmente.
+    if normalizar_texto(estacion_nombre) == "ENAPU":
+        combinado["prioridad"] = np.where(
+            combinado["ESTADO_FECHA"].astype(str).str.contains("EXCEL_HISTORICO", case=False, na=False),
+            2,
+            1,
+        )
+    else:
+        # Para otras estaciones, API actualiza si hay dato nuevo/revisado
+        combinado["prioridad"] = np.where(
+            combinado["ESTADO_FECHA"].astype(str).str.contains("API|ORIGINAL|RECONSTRUIDA", case=False, na=False),
+            2,
+            1,
+        )
 
     combinado = combinado.sort_values(["FECHA", "prioridad"]).drop_duplicates(
         subset=["FECHA"],
@@ -1037,10 +1072,12 @@ def sincronizar_exceles_drive(
                 omitidos += 1
                 continue
 
+            fecha_ini_estacion = FECHA_MIN_API_POR_ESTACION.get(estacion_nombre, OBS_API_START_DATE)
+
             df_api_excel = descargar_api_hidromet_formato_excel_estacion(
                 id_estacion=id_estacion,
                 estacion_nombre=estacion_nombre,
-                fecha_ini=OBS_API_START_DATE,
+                fecha_ini=fecha_ini_estacion,
                 fecha_fin=OBS_API_END_DATE,
             )
 

@@ -156,6 +156,16 @@ def _copiar_estilo_fila(ws, fila_origen: int, fila_destino: int) -> None:
 
 
 def _id_desde_libro(ws, headers: dict[str, int], nombre: str) -> int | None:
+    # Prioridad 1: ID oficial de la API de HidroMet
+    mapa_oficial = {
+        hidromet.normalizar_texto(nom): int(id_estacion)
+        for id_estacion, nom in hidromet.ESTACIONES_API.items()
+    }
+    nombre_norm = hidromet.normalizar_texto(nombre)
+    if nombre_norm in mapa_oficial:
+        return mapa_oficial[nombre_norm]
+
+    # Prioridad 2: Buscar en las celdas del Excel si no estuviera en el mapa oficial
     for etiqueta in ("ID_ESTACION", "ID", "ID ESTACION"):
         col = headers.get(etiqueta)
         if col is None:
@@ -165,11 +175,8 @@ def _id_desde_libro(ws, headers: dict[str, int], nombre: str) -> int | None:
             numero = pd.to_numeric(valor, errors="coerce")
             if pd.notna(numero):
                 return int(numero)
-    mapa = {
-        nombre: int(id_estacion)
-        for id_estacion, nombre in hidromet.ESTACIONES_API.items()
-    }
-    return mapa.get(nombre)
+
+    return None
 
 
 def _fila_por_fecha(ws, headers: dict[str, int]) -> dict[date, int]:

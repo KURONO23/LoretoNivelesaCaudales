@@ -221,6 +221,12 @@ def actualizar_libro_prediccion(
     actualizadas = 0
     insertadas = 0
 
+    # Para ENAPU, solo se deben completar registros a partir de octubre 2026
+    # y nunca sobreescribir datos que ya están en el Excel de Drive.
+    es_enapu = hidromet.normalizar_texto(estacion_nombre) == "ENAPU"
+    if es_enapu:
+        df = df[df["FECHA"] >= pd.Timestamp("2026-10-01")].copy()
+
     for _, registro in df.iterrows():
         fecha_ts = registro["FECHA"]
         fecha = fecha_ts.date()
@@ -232,6 +238,9 @@ def actualizar_libro_prediccion(
             filas[fecha] = fila
             insertadas += 1
         else:
+            if es_enapu:
+                # Para ENAPU no se sobreescriben filas ya existentes en el Excel
+                continue
             actualizadas += 1
 
         valores = {
@@ -289,6 +298,11 @@ def _leer_libro_backend(path_excel: Path, estacion: str) -> pd.DataFrame:
     nivel_hprom = pd.to_numeric(df["H_PROM"], errors="coerce")
     nivel_horario = salida[columnas_horarias].replace(-999, np.nan).mean(axis=1, skipna=True)
     salida["nivel_m"] = nivel_hprom.fillna(nivel_horario)
+
+    # Salvaguarda: ENAPU solo maneja niveles de escala (< 25 m), descartar cotas absolutas > 50 m
+    if hidromet.normalizar_texto(estacion) == "ENAPU":
+        salida.loc[salida["nivel_m"] > 50, "nivel_m"] = np.nan
+
     estado = df.get("ESTADO_FECHA")
     salida["estado_fecha"] = estado.astype(str) if estado is not None else ""
     salida["fuente"] = "PREDICCIONES306090_DRIVE"
@@ -383,11 +397,18 @@ def procesar_drive() -> int:
                 print(f"[OMITIDO] {nombre}: no se encontró ID_ESTACION.")
                 continue
 
-            print(f"[API] {nombre} | ID {id_estacion}")
+            fecha_ini_api = getattr(hidromet, "FECHA_MIN_API_POR_ESTACION", {}).get(
+                nombre, PRED_API_START_DATE
+            )
+            # Si la fecha mínima requerida es posterior al inicio por defecto, respetarla
+            if PRED_API_START_DATE < fecha_ini_api:
+                fecha_ini_api = fecha_ini_api
+
+            print(f"[API] {nombre} | ID {id_estacion} (desde {fecha_ini_api})")
             df_api = hidromet.descargar_api_hidromet_formato_excel_estacion(
                 id_estacion=id_estacion,
                 estacion_nombre=nombre,
-                fecha_ini=PRED_API_START_DATE,
+                fecha_ini=fecha_ini_api,
                 fecha_fin=PRED_API_END_DATE,
             )
 
@@ -401,7 +422,7 @@ def procesar_drive() -> int:
                 df_api=df_api,
                 id_estacion=id_estacion,
                 estacion_nombre=nombre,
-                fecha_ini=PRED_API_START_DATE,
+                fecha_ini=fecha_ini_api,
                 fecha_fin=PRED_API_END_DATE,
             )
 

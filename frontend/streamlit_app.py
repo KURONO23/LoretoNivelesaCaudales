@@ -1823,10 +1823,14 @@ def graficar_pronostico_306090(
     estado_normalizado = normalizar_texto(estado)
     mensaje_estado = f"Estado del horizonte H+{horizonte_sel}: **{estado}** · Modelo: `{modelo}`"
     if "EXCLUIDA" in estado_normalizado:
-        st.error(
-            mensaje_estado
-            + ". No se aplica corrección de continuidad porque la estación mezcla cotas y tirantes."
-        )
+        if "ENAPU" in normalizar_texto(estacion_sel):
+            # ENAPU ya tiene datos subsanados y se integra con la serie continua
+            st.info(
+                f"Estado del horizonte H+{horizonte_sel}: **OK_SUBSANADO** · Modelo: `{modelo}`. "
+                "Serie subsanada en escala local."
+            )
+        else:
+            st.warning(mensaje_estado)
     elif "OK" in estado_normalizado:
         st.success(mensaje_estado)
     elif "FALLBACK" in estado_normalizado:

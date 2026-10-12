@@ -28,7 +28,7 @@ HORIZONTES = (30, 60, 90)
 ORDENES = (1, 2, 3, 5, 7, 10)
 MAX_HISTORIA = 730
 MIN_DIFERENCIAS = 60
-ESTACIONES_EXCLUIDAS = {"ENAPU"}
+ESTACIONES_EXCLUIDAS = set()
 
 
 def serie_diaria(grupo: pd.DataFrame) -> tuple[pd.DatetimeIndex, np.ndarray]:

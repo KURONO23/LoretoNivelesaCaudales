@@ -31,7 +31,7 @@ SALIDA_ANTERIOR = (
 )
 PREDICTOR = BASE_DIR / "scripts" / "13_pronostico_30_60_90_analogos.py"
 OUT_DIR = BASE_DIR / "outputs" / "validacion_continuidad_30_60_90"
-EXCLUIDAS = {"ENAPU"}
+EXCLUIDAS = set()
 
 
 def cargar_predictor():

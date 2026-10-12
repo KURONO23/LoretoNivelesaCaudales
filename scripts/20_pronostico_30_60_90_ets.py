@@ -20,7 +20,7 @@ OUT_RESUMEN = OUTPUT_DIR / "resumen_pronostico_30_60_90_ets.csv"
 
 HORIZONTES = (30, 60, 90)
 MAX_HISTORIA = 730
-ESTACIONES_EXCLUIDAS = {"ENAPU"}
+ESTACIONES_EXCLUIDAS = set()
 
 
 def serie_diaria(grupo: pd.DataFrame) -> tuple[pd.DatetimeIndex, np.ndarray]:

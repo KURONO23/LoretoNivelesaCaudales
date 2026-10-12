@@ -128,11 +128,7 @@ def main() -> int:
     for estacion, grupo in sorted(datos.groupby("estacion", sort=True)):
         id_col = pd.to_numeric(grupo["id_estacion"], errors="coerce").dropna() if "id_estacion" in grupo.columns else pd.Series(dtype=float)
         id_value = float(id_col.iloc[0]) if not id_col.empty else np.nan
-        es_enapu = str(estacion).strip().upper() == "ENAPU"
-        if es_enapu:
-            calibracion = {h: {"q": np.nan, "n": 0} for h in HORIZONTES}
-        else:
-            calibracion = calibrar_estacion(base, str(estacion), id_value, grupo)
+        calibracion = calibrar_estacion(base, str(estacion), id_value, grupo)
         bloque = actual[actual["estacion"].astype(str).str.strip() == str(estacion).strip()].copy()
         if bloque.empty:
             continue
@@ -143,13 +139,7 @@ def main() -> int:
             q_por_h[horizonte] = q
             mask = bloque["horizonte_dias"].astype(int) == horizonte
             centro = pd.to_numeric(bloque.loc[mask, "nivel_hibrido_m"], errors="coerce")
-            if es_enapu:
-                bloque.loc[mask, "p10_conformal_m"] = bloque.loc[mask, "p10_m"]
-                bloque.loc[mask, "p90_conformal_m"] = bloque.loc[mask, "p90_m"]
-                bloque.loc[mask, "conformal_q_m"] = np.nan
-                bloque.loc[mask, "n_calibracion"] = 0
-                bloque.loc[mask, "estado_conformal"] = "EXCLUIDA_UNIDADES_MIXTAS"
-            elif np.isfinite(q):
+            if np.isfinite(q):
                 bloque.loc[mask, "p10_conformal_m"] = centro - q
                 bloque.loc[mask, "p90_conformal_m"] = centro + q
                 bloque.loc[mask, "conformal_q_m"] = q
@@ -171,9 +161,7 @@ def main() -> int:
                 "conformal_q_m": q_por_h[horizonte],
                 "n_calibracion": calibracion[horizonte]["n"],
                 "estado_conformal": (
-                    "EXCLUIDA_UNIDADES_MIXTAS"
-                    if es_enapu
-                    else "OK_CALIBRADO"
+                    "OK_CALIBRADO"
                     if np.isfinite(q_por_h[horizonte])
                     else "SIN_CALIBRACION_USA_P10_P90"
                 ),

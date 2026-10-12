@@ -55,7 +55,8 @@ hidromet.GOOGLE_SERVICE_JSON = os.getenv(
 ).strip()
 
 def _fecha_defecto_inicio() -> str:
-    return (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    # 20 días de ventana para evitar lagunas si alguna estación o API tuvo retraso de reporte
+    return (date.today() - timedelta(days=20)).strftime("%Y-%m-%d")
 
 
 PRED_API_START_DATE = os.getenv(

@@ -162,8 +162,7 @@ def main() -> int:
     for estacion, grupo in sorted(datos.groupby("estacion", sort=True)):
         id_col = pd.to_numeric(grupo["id_estacion"], errors="coerce").dropna() if "id_estacion" in grupo.columns else pd.Series(dtype=float)
         id_value = float(id_col.iloc[0]) if not id_col.empty else np.nan
-        es_enapu = str(estacion).strip().upper() == "ENAPU"
-        calibracion = {h: {"pesos": np.full(len(MIEMBROS), np.nan), "intercepto": np.nan, "n": 0} for h in HORIZONTES} if es_enapu else calibrar_estacion(base, selector_dtw, str(estacion), id_value, grupo)
+        calibracion = calibrar_estacion(base, selector_dtw, str(estacion), id_value, grupo)
         mask_est = salida["estacion"].astype(str).str.strip() == str(estacion).strip()
         bloque = salida[mask_est].copy()
         for horizonte in HORIZONTES:
@@ -176,15 +175,15 @@ def main() -> int:
                 bloque.loc[mask, "nivel_emos_m"] = emos
                 bloque.loc[mask, "estado_emos"] = "OK_CALIBRADO"
             else:
-                bloque.loc[mask, "nivel_emos_m"] = np.nan if es_enapu else bloque.loc[mask, "nivel_hibrido_m"]
-                bloque.loc[mask, "estado_emos"] = "EXCLUIDA_UNIDADES_MIXTAS" if es_enapu else "SIN_CALIBRACION_USA_VIGENTE"
+                bloque.loc[mask, "nivel_emos_m"] = bloque.loc[mask, "nivel_hibrido_m"]
+                bloque.loc[mask, "estado_emos"] = "SIN_CALIBRACION_USA_VIGENTE"
             bloque.loc[mask, "peso_analogo"] = pesos[0]
             bloque.loc[mask, "peso_dtw"] = pesos[1]
             bloque.loc[mask, "peso_persistencia"] = pesos[2]
             bloque.loc[mask, "peso_climatologia"] = pesos[3]
             bloque.loc[mask, "intercepto_emos_m"] = cal["intercepto"]
             bloque.loc[mask, "n_calibracion_emos"] = cal["n"]
-        if not es_enapu and "nivel_emos_m" in bloque.columns and np.isfinite(bloque["nivel_emos_m"]).any():
+        if "nivel_emos_m" in bloque.columns and np.isfinite(bloque["nivel_emos_m"]).any():
             origen = pd.to_datetime(bloque["fecha_origen"], errors="coerce").dropna().iloc[0]
             observado = grupo[pd.to_datetime(grupo["fecha"], errors="coerce").dt.normalize() == origen]["nivel_m"]
             if not observado.empty:
@@ -196,7 +195,7 @@ def main() -> int:
         salida.loc[mask_est, bloque.columns] = bloque
         for horizonte in HORIZONTES:
             cal = calibracion[horizonte]
-            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": "EXCLUIDA_UNIDADES_MIXTAS" if es_enapu else "OK_CALIBRADO" if np.isfinite(cal["pesos"]).all() else "SIN_CALIBRACION_USA_VIGENTE"})
+            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": "OK_CALIBRADO" if np.isfinite(cal["pesos"]).all() else "SIN_CALIBRACION_USA_VIGENTE"})
 
     salida["metodo_emos"] = "EMOS_LINEAL_EXPERIMENTAL"
     salida = salida.sort_values(["estacion", "horizonte_dias", "fecha_pronostico"]).reset_index(drop=True)

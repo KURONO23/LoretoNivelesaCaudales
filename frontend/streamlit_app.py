@@ -2017,6 +2017,26 @@ def graficar_pronostico_306090(
                 .sort_values("fecha")
                 .iloc[-1]["nivel_m"]
             )
+
+            # El método principal también debe compartir el mismo punto de
+            # arranque que las variantes experimentales. En ENAPU la salida
+            # puede conservar un desplazamiento por la mezcla de cota y
+            # tirante; aquí se corrige solo para la visualización y se aplica
+            # el mismo desplazamiento al intervalo P10–P90.
+            principal_visible = pd.to_numeric(
+                pred_sel["nivel_principal_m"], errors="coerce"
+            )
+            primer_principal = principal_visible.dropna()
+            if not primer_principal.empty:
+                offset_principal = ultimo_observado - float(primer_principal.iloc[0])
+                pred_sel["nivel_principal_m"] = principal_visible + offset_principal
+                for columna_intervalo in ("p10_m", "p90_m"):
+                    if columna_intervalo in pred_sel.columns:
+                        intervalo = pd.to_numeric(
+                            pred_sel[columna_intervalo], errors="coerce"
+                        )
+                        pred_sel[columna_intervalo] = intervalo + offset_principal
+
             pred_sel = anclar_componente_al_observado(
                 pred_sel, "nivel_analogos_m", ultimo_observado, estacion_sel
             )

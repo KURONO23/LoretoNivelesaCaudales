@@ -2040,14 +2040,12 @@ def graficar_pronostico_306090(
             pred_sel = anclar_componente_al_observado(
                 pred_sel, "nivel_analogos_m", ultimo_observado, estacion_sel
             )
-            # ENAPU mezcla cota y tirante. Si se desplaza su DTW con el mismo
-            # offset del observado, queda artificialmente idéntico a EMOS;
-            # se conserva su escala publicada y se muestra la discontinuidad
-            # mediante la unión punteada roja.
-            if normalizar_texto(estacion_sel) != "ENAPU":
-                dtw_sel = anclar_componente_al_observado(
-                    dtw_sel, "nivel_dtw_m", ultimo_observado, estacion_sel
-                )
+            # Todas las variantes deben comenzar en el último observado,
+            # incluido ENAPU. El ajuste es únicamente gráfico y conserva los
+            # vacíos; la continuidad queda señalada con la unión roja punteada.
+            dtw_sel = anclar_componente_al_observado(
+                dtw_sel, "nivel_dtw_m", ultimo_observado, estacion_sel
+            )
             emos_sel = anclar_componente_al_observado(
                 emos_sel, "nivel_emos_m", ultimo_observado, estacion_sel
             )

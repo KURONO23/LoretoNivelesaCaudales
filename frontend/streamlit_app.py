@@ -1813,13 +1813,13 @@ def anclar_componente_al_observado(
     """Alinea una componente gráfica con el último observado disponible.
 
     Solo desplaza los valores existentes; no rellena brechas ni modifica los
-    archivos del backend. ENAPU queda excluida por sus unidades mixtas.
+    archivos del backend. La excepción de unidades mixtas de ENAPU se mantiene
+    en el backend; aquí solo se corrige la continuidad de la presentación.
     """
     if (
         serie.empty
         or columna not in serie.columns
         or not np.isfinite(ultimo_observado)
-        or normalizar_texto(estacion) == "ENAPU"
     ):
         return serie
 

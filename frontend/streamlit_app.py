@@ -1795,7 +1795,22 @@ def graficar_pronostico_306090(
     estado = str(pred_sel["estado"].dropna().iloc[0]) if "estado" in pred_sel and pred_sel["estado"].notna().any() else "SIN_ESTADO"
     modelo = str(pred_sel["modelo"].dropna().iloc[0]) if "modelo" in pred_sel and pred_sel["modelo"].notna().any() else "Sin dato"
 
-    col_principal = "nivel_hibrido_m" if "nivel_hibrido_m" in pred_sel.columns else "nivel_pronosticado_m"
+        # Seleccion robusta: usa persistencia si no hay diez analogos.
+    modelo_normalizado = normalizar_texto(modelo)
+    if "PERSISTENCIA" in modelo_normalizado:
+        candidatos_principal = [("nivel_pronosticado_m", "Pronostico por persistencia"), ("nivel_persistencia_m", "Pronostico por persistencia")]
+    else:
+        candidatos_principal = [("nivel_hibrido_m", "Pronostico hibrido"), ("nivel_pronosticado_m", "Pronostico seleccionado"), ("nivel_persistencia_m", "Pronostico por persistencia")]
+    col_principal = None
+    nombre_principal = "Pronostico"
+    for candidato, nombre in candidatos_principal:
+        if candidato in pred_sel.columns and pd.to_numeric(pred_sel[candidato], errors="coerce").notna().any():
+            col_principal = candidato
+            nombre_principal = nombre
+            break
+    if col_principal is None:
+        st.warning("La emision no contiene una serie numerica de pronostico para este horizonte.")
+        return
     pred_sel["nivel_principal_m"] = pd.to_numeric(pred_sel[col_principal], errors="coerce")
 
     ultimos = pred_sel.dropna(subset=["nivel_principal_m"])
@@ -1941,7 +1956,7 @@ def graficar_pronostico_306090(
             x=pred_sel["fecha_pronostico"],
             y=pred_sel["nivel_principal_m"],
             mode="lines+markers",
-            name="Pronóstico híbrido",
+            name=nombre_principal,
             line=dict(width=3, color="#2563eb"),
             marker=dict(size=5, color="#2563eb"),
             connectgaps=False,

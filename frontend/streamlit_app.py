@@ -1804,6 +1804,35 @@ def preparar_observado_con_brechas(
     return obs_d
 
 
+def anclar_componente_al_observado(
+    serie: pd.DataFrame,
+    columna: str,
+    ultimo_observado: float,
+    estacion: str,
+) -> pd.DataFrame:
+    """Alinea una componente gráfica con el último observado disponible.
+
+    Solo desplaza los valores existentes; no rellena brechas ni modifica los
+    archivos del backend. ENAPU queda excluida por sus unidades mixtas.
+    """
+    if (
+        serie.empty
+        or columna not in serie.columns
+        or not np.isfinite(ultimo_observado)
+        or normalizar_texto(estacion) == "ENAPU"
+    ):
+        return serie
+
+    salida = serie.copy()
+    valores = pd.to_numeric(salida[columna], errors="coerce")
+    disponibles = valores.dropna()
+    if disponibles.empty:
+        return salida
+
+    salida[columna] = valores + (float(ultimo_observado) - float(disponibles.iloc[0]))
+    return salida
+
+
 def graficar_pronostico_306090(
     pred_est: pd.DataFrame,
     obs_est: pd.DataFrame,
@@ -1981,6 +2010,21 @@ def graficar_pronostico_306090(
                     marker=dict(size=6, color="#111827"),
                     connectgaps=False,
                 )
+            )
+
+            ultimo_observado = float(
+                obs_plot.dropna(subset=["nivel_m"])
+                .sort_values("fecha")
+                .iloc[-1]["nivel_m"]
+            )
+            pred_sel = anclar_componente_al_observado(
+                pred_sel, "nivel_analogos_m", ultimo_observado, estacion_sel
+            )
+            dtw_sel = anclar_componente_al_observado(
+                dtw_sel, "nivel_dtw_m", ultimo_observado, estacion_sel
+            )
+            emos_sel = anclar_componente_al_observado(
+                emos_sel, "nivel_emos_m", ultimo_observado, estacion_sel
             )
 
     # Une visualmente el último dato observado con el primer pronóstico.

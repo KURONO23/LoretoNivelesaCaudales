@@ -42,7 +42,9 @@ VENTANAS = (30, 60, 90)
 K = 10
 CANDIDATE_STRIDE = 14
 METODO = "ANALOGO_ESTADO_V2_HIBRIDO_CLIMATOLOGIA"
-ESTACIONES_SIN_CORRECCION_CONTINUIDAD = set()
+# ENAPU mezcla cotas absolutas y tirantes; no se debe aplicar el anclaje
+# automático de continuidad hasta que su serie esté homologada.
+ESTACIONES_SIN_CORRECCION_CONTINUIDAD = {"ENAPU"}
 
 
 def _metricas_basicas(observado: np.ndarray, predicho: np.ndarray) -> dict:

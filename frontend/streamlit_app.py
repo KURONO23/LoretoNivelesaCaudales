@@ -46,6 +46,8 @@ PREDICCIONES_306090_DTW_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90
 PREDICCIONES_306090_DTW_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_dtw_actual.csv"
 PREDICCIONES_306090_EMOS_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.parquet"
 PREDICCIONES_306090_EMOS_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_emos_actual.csv"
+PREDICCIONES_306090_CONFORMAL_PARQUET = PREDICCIONES_306090_DIR / "pronostico_30_60_90_conformal_actual.parquet"
+PREDICCIONES_306090_CONFORMAL_CSV = PREDICCIONES_306090_DIR / "pronostico_30_60_90_conformal_actual.csv"
 
 LOGO_FILE = BASE_DIR / "frontend" / "assets" / "logo_amaru.png"
 
@@ -881,6 +883,26 @@ def estaciones_con_salida_306090(pred: pd.DataFrame) -> set[str]:
     if pred.empty or "estacion" not in pred.columns:
         return set()
 
+    valido = salida_306090_valida(pred)
+    return set(
+        pred.loc[valido, "estacion"]
+        .astype(str)
+        .map(normalizar_texto)
+        .dropna()
+    )
+
+
+def salida_306090_valida(pred: pd.DataFrame) -> pd.Series:
+    """Marca filas con una emisión de análogos realmente utilizable.
+
+    Algunas ejecuciones publican un archivo principal con persistencia para
+    una estación, mientras otra salida del mismo backend conserva la emisión
+    válida de diez análogos. La validación se hace por fila y por estado para
+    no retirar una estación que sí tiene una salida operativa publicada.
+    """
+    if pred.empty:
+        return pd.Series(dtype=bool)
+
     n_analogos = pd.to_numeric(
         pred.get("n_analogos", pd.Series(index=pred.index, dtype=float)),
         errors="coerce",
@@ -899,17 +921,38 @@ def estaciones_con_salida_306090(pred: pd.DataFrame) -> set[str]:
                 pred[columna], errors="coerce"
             ).notna()
 
-    valido = (
-        n_analogos.ge(10)
-        & tiene_serie
-        & ~estado.str.contains("SIN_10_ANALOGOS|PERSISTENCIA", na=False)
+    respaldo_persistencia = estado.str.contains(
+        "SIN_10_ANALOGOS|USA_PERSISTENCIA|FALLBACK", na=False
     )
-    return set(
-        pred.loc[valido, "estacion"]
-        .astype(str)
-        .map(normalizar_texto)
-        .dropna()
+    estado_analogo_ok = estado.str.contains("OK_ANALOGOS", na=False)
+    return tiene_serie & ~respaldo_persistencia & (
+        n_analogos.ge(10) | estado_analogo_ok
     )
+
+
+def seleccionar_prediccion_306090(
+    estacion_norm: str,
+    *fuentes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Devuelve la primera emisión válida publicada para una estación.
+
+    Se prioriza el archivo vigente. Si esa estación quedó en persistencia,
+    se usa una salida válida del backend (conformal) antes de dejarla sin
+    datos en el visor.
+    """
+    primera_coincidencia = pd.DataFrame()
+    for fuente in fuentes:
+        if fuente.empty or "estacion" not in fuente.columns:
+            continue
+        mask = fuente["estacion"].apply(normalizar_texto) == estacion_norm
+        candidato = fuente.loc[mask].copy()
+        if candidato.empty:
+            continue
+        if primera_coincidencia.empty:
+            primera_coincidencia = candidato
+        if salida_306090_valida(candidato).any():
+            return candidato.loc[salida_306090_valida(candidato)].copy()
+    return primera_coincidencia
 
 
 # ============================================================
@@ -2151,6 +2194,11 @@ predicciones_306090_emos = cargar_predicciones_306090(
     csv_path=PREDICCIONES_306090_EMOS_CSV,
     fuente="EMOS/BMA lineal (experimental)",
 )
+predicciones_306090_conformal = cargar_predicciones_306090(
+    parquet_path=PREDICCIONES_306090_CONFORMAL_PARQUET,
+    csv_path=PREDICCIONES_306090_CONFORMAL_CSV,
+    fuente="Análogos conformal (respaldo backend)",
+)
 resumen_306090 = cargar_resumen_306090()
 
 if "nivel_m" in obs.columns:
@@ -2252,7 +2300,12 @@ estacion_a_comid = dict(zip(tabla_estaciones_pron["estacion"], tabla_estaciones_
 comid_a_estacion = dict(zip(tabla_estaciones_pron["comid"], tabla_estaciones_pron["estacion"]))
 
 if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
-    estaciones_306090_norm = estaciones_con_salida_306090(predicciones_306090)
+    estaciones_306090_norm = set().union(
+        estaciones_con_salida_306090(predicciones_306090),
+        estaciones_con_salida_306090(predicciones_306090_dtw),
+        estaciones_con_salida_306090(predicciones_306090_emos),
+        estaciones_con_salida_306090(predicciones_306090_conformal),
+    )
     estaciones_306090_disponibles = [
         estacion
         for estacion in estaciones_disponibles
@@ -2497,10 +2550,13 @@ else:
             estaciones["estacion"].apply(normalizar_texto).isin(nombres_306090)
         ].copy()
         estacion_sel_norm = normalizar_texto(estacion_sel)
-        mask_estacion_306090 = predicciones_306090["estacion"].apply(
-            normalizar_texto
-        ) == estacion_sel_norm
-        pred_306090_est = predicciones_306090[mask_estacion_306090].copy()
+        pred_306090_est = seleccionar_prediccion_306090(
+            estacion_sel_norm,
+            predicciones_306090,
+            predicciones_306090_conformal,
+            predicciones_306090_dtw,
+            predicciones_306090_emos,
+        )
         if not predicciones_306090_dtw.empty and "estacion" in predicciones_306090_dtw.columns:
             mask_estacion_dtw = predicciones_306090_dtw["estacion"].apply(
                 normalizar_texto

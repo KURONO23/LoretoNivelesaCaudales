@@ -2071,13 +2071,12 @@ def graficar_pronostico_306090(
             )
 
     # Continuidad visual de la variante DTW; no modifica ninguna serie.
-    dtw_estado = (
-        str(dtw_sel["estado"].dropna().iloc[0])
-        if "estado" in dtw_sel and dtw_sel["estado"].notna().any()
-        else ""
-    )
-    dtw_excluida = "EXCLUIDA" in normalizar_texto(dtw_estado)
-    if not dtw_sel.empty and "nivel_dtw_m" in dtw_sel.columns and not dtw_excluida:
+    # El conector rojo es una referencia visual entre el último observado y
+    # el primer punto de la variante DTW. ENAPU se excluye de la corrección
+    # física de unidades en el backend, pero el frontend ancla todas las
+    # variantes al mismo origen para compararlas; por ello el conector debe
+    # mostrarse también para ENAPU y para los tres horizontes.
+    if not dtw_sel.empty and "nivel_dtw_m" in dtw_sel.columns:
         dtw_tmp = dtw_sel.dropna(subset=["fecha_pronostico", "nivel_dtw_m"]).copy()
         obs_tmp = obs_plot.dropna(subset=["fecha", "nivel_m"]).copy() if "obs_plot" in locals() else pd.DataFrame()
         if not dtw_tmp.empty and not obs_tmp.empty and not pd.isna(fecha_origen):

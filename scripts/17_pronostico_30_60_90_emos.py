@@ -29,6 +29,7 @@ MIEMBROS = ("analogo", "dtw", "persistencia", "climatologia")
 MAX_ORIGENES = 6
 ESPACIADO_ORIGENES_DIAS = 30
 MIN_CALIBRACION = 24
+UMBRAL_EQUIVALENCIA_DTW = 0.95
 
 
 def cargar_modulo(nombre: str, archivo: str):
@@ -79,6 +80,23 @@ def ajustar_pesos(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, float]:
         pesos = pesos / pesos.sum()
     intercepto = float(np.mean(y[mask] - X[mask] @ pesos))
     return pesos, intercepto
+
+
+def estado_calibracion(pesos: np.ndarray) -> str:
+    """Describe una calibración que colapsa en un único miembro.
+
+    No modifica los pesos ni fabrica una separación gráfica. La marca permite
+    que la salida documente cuándo EMOS es matemáticamente equivalente a DTW.
+    """
+    if (
+        np.isfinite(pesos).all()
+        and pesos[1] >= UMBRAL_EQUIVALENCIA_DTW
+        and np.delete(pesos, 1).sum() <= 1.0 - UMBRAL_EQUIVALENCIA_DTW + 1e-9
+    ):
+        return "EMOS_EQUIVALENTE_DTW"
+    if np.isfinite(pesos).all():
+        return "OK_CALIBRADO"
+    return "SIN_CALIBRACION_USA_VIGENTE"
 
 
 def pronostico_miembro(base, selector_dtw, historico: pd.DataFrame, estacion: str, id_estacion: float, fecha_origen: pd.Timestamp, horizonte: int, usar_dtw: bool) -> pd.DataFrame:
@@ -136,7 +154,12 @@ def calibrar_estacion(base, selector_dtw, estacion: str, id_estacion: float, gru
             n = int(np.isfinite(tabla[:, 4]).sum())
         else:
             pesos, intercepto, n = np.full(len(MIEMBROS), np.nan), np.nan, 0
-        resultado[horizonte] = {"pesos": pesos, "intercepto": intercepto, "n": n}
+        resultado[horizonte] = {
+            "pesos": pesos,
+            "intercepto": intercepto,
+            "n": n,
+            "estado": estado_calibracion(pesos),
+        }
     return resultado
 
 
@@ -173,7 +196,7 @@ def main() -> int:
                 X = bloque.loc[mask, ["nivel_hibrido_m", "nivel_hibrido_dtw_m", "nivel_persistencia_m", "nivel_climatologia_m"]].to_numpy(dtype=float)
                 emos = cal["intercepto"] + X @ pesos
                 bloque.loc[mask, "nivel_emos_m"] = emos
-                bloque.loc[mask, "estado_emos"] = "OK_CALIBRADO"
+                bloque.loc[mask, "estado_emos"] = cal["estado"]
             else:
                 # Si aún no tiene suficientes ventanas retrospectivas completas de calibración,
                 # EMOS combina equitativamente los miembros disponibles (Híbrido + DTW + Climatología)
@@ -200,7 +223,7 @@ def main() -> int:
         salida.loc[mask_est, bloque.columns] = bloque
         for horizonte in HORIZONTES:
             cal = calibracion[horizonte]
-            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": "OK_CALIBRADO" if np.isfinite(cal["pesos"]).all() else "SIN_CALIBRACION_USA_VIGENTE"})
+            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": cal["estado"]})
 
     salida["metodo_emos"] = "EMOS_LINEAL_EXPERIMENTAL"
     salida = salida.sort_values(["estacion", "horizonte_dias", "fecha_pronostico"]).reset_index(drop=True)

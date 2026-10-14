@@ -2067,7 +2067,11 @@ def graficar_pronostico_306090(
         )
     )
 
+    componentes_sin_datos = []
     if not dtw_sel.empty and "nivel_dtw_m" in dtw_sel.columns:
+        dtw_visible = dtw_sel.dropna(subset=["fecha_pronostico", "nivel_dtw_m"])
+        if dtw_visible.empty:
+            componentes_sin_datos.append("DTW")
         fig.add_trace(
             go.Scatter(
                 x=dtw_sel["fecha_pronostico"],
@@ -2079,8 +2083,13 @@ def graficar_pronostico_306090(
                 connectgaps=False,
             )
         )
+    else:
+        componentes_sin_datos.append("DTW")
 
     if not emos_sel.empty and "nivel_emos_m" in emos_sel.columns:
+        emos_visible = emos_sel.dropna(subset=["fecha_pronostico", "nivel_emos_m"])
+        if emos_visible.empty:
+            componentes_sin_datos.append("EMOS/BMA")
         fig.add_trace(
             go.Scatter(
                 x=emos_sel["fecha_pronostico"],
@@ -2092,8 +2101,15 @@ def graficar_pronostico_306090(
                 connectgaps=False,
             )
         )
+    else:
+        componentes_sin_datos.append("EMOS/BMA")
 
     if "nivel_analogos_m" in pred_sel.columns:
+        analogos_visible = pred_sel.dropna(
+            subset=["fecha_pronostico", "nivel_analogos_m"]
+        )
+        if analogos_visible.empty:
+            componentes_sin_datos.append("análogos")
         fig.add_trace(
             go.Scatter(
                 x=pred_sel["fecha_pronostico"],
@@ -2101,10 +2117,11 @@ def graficar_pronostico_306090(
                 mode="lines",
                 name="Componente de análogos",
                 line=dict(width=1.5, color="#0f766e", dash="dot"),
-                visible="legendonly",
                 connectgaps=False,
             )
         )
+    else:
+        componentes_sin_datos.append("análogos")
 
     if not pd.isna(fecha_origen):
         fig.add_shape(
@@ -2139,6 +2156,13 @@ def graficar_pronostico_306090(
         legend=dict(font=dict(size=10), title_font=dict(size=10)),
     )
     st.plotly_chart(fig, use_container_width=True)
+    componentes_sin_datos = list(dict.fromkeys(componentes_sin_datos))
+    if componentes_sin_datos:
+        st.info(
+            "La emisión vigente no contiene valores para: "
+            + ", ".join(componentes_sin_datos)
+            + ". Se conservan como vacíos para no fabricar líneas."
+        )
     st.caption(
         "La línea negra corresponde al observado y conserva las brechas como espacios sin línea. "
         "La línea punteada une visualmente el último observado con el primer pronóstico. "

@@ -872,6 +872,46 @@ def cargar_resumen_306090() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def estaciones_con_salida_306090(pred: pd.DataFrame) -> set[str]:
+    """Selecciona estaciones con una salida de análogos operativa.
+
+    Las filas de respaldo por persistencia se conservan en los archivos para
+    trazabilidad, pero no se presentan como pronóstico 30/60/90 en el visor.
+    """
+    if pred.empty or "estacion" not in pred.columns:
+        return set()
+
+    n_analogos = pd.to_numeric(
+        pred.get("n_analogos", pd.Series(index=pred.index, dtype=float)),
+        errors="coerce",
+    )
+    estado = pred.get("estado", pd.Series(index=pred.index, dtype="string"))
+    estado = estado.astype("string").fillna("").str.upper()
+
+    tiene_serie = pd.Series(False, index=pred.index)
+    for columna in (
+        "nivel_hibrido_m",
+        "nivel_pronosticado_m",
+        "nivel_persistencia_m",
+    ):
+        if columna in pred.columns:
+            tiene_serie = tiene_serie | pd.to_numeric(
+                pred[columna], errors="coerce"
+            ).notna()
+
+    valido = (
+        n_analogos.ge(10)
+        & tiene_serie
+        & ~estado.str.contains("SIN_10_ANALOGOS|PERSISTENCIA", na=False)
+    )
+    return set(
+        pred.loc[valido, "estacion"]
+        .astype(str)
+        .map(normalizar_texto)
+        .dropna()
+    )
+
+
 # ============================================================
 # VALIDACIONES Y PROCESOS
 # ============================================================
@@ -1795,6 +1835,27 @@ def graficar_pronostico_306090(
     estado = str(pred_sel["estado"].dropna().iloc[0]) if "estado" in pred_sel and pred_sel["estado"].notna().any() else "SIN_ESTADO"
     modelo = str(pred_sel["modelo"].dropna().iloc[0]) if "modelo" in pred_sel and pred_sel["modelo"].notna().any() else "Sin dato"
 
+    n_analogos_emision = (
+        pd.to_numeric(pred_sel["n_analogos"], errors="coerce").dropna().iloc[0]
+        if "n_analogos" in pred_sel
+        and pd.to_numeric(pred_sel["n_analogos"], errors="coerce").notna().any()
+        else np.nan
+    )
+    estado_normalizado = normalizar_texto(estado)
+    if (
+        pd.isna(n_analogos_emision)
+        or n_analogos_emision < 10
+        or "SIN_10_ANALOGOS" in estado_normalizado
+        or "PERSISTENCIA" in estado_normalizado
+    ):
+        st.warning(
+            "Esta estación no tiene un pronóstico 30/60/90 operativo: "
+            "no alcanzó los 10 análogos requeridos. "
+            "La persistencia se conserva en los archivos de trazabilidad, "
+            "pero no se grafica como pronóstico por análogos."
+        )
+        return
+
         # Seleccion robusta: usa persistencia si no hay diez analogos.
     modelo_normalizado = normalizar_texto(modelo)
     if "PERSISTENCIA" in modelo_normalizado:
@@ -2191,9 +2252,7 @@ estacion_a_comid = dict(zip(tabla_estaciones_pron["estacion"], tabla_estaciones_
 comid_a_estacion = dict(zip(tabla_estaciones_pron["comid"], tabla_estaciones_pron["estacion"]))
 
 if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
-    estaciones_306090_norm = set(
-        predicciones_306090["estacion"].apply(normalizar_texto).dropna()
-    )
+    estaciones_306090_norm = estaciones_con_salida_306090(predicciones_306090)
     estaciones_306090_disponibles = [
         estacion
         for estacion in estaciones_disponibles
@@ -2219,11 +2278,16 @@ else:
         label_visibility="collapsed",
     )
 
-estaciones_selector = (
-    estaciones_306090_disponibles
-    if vista_principal == "Pronóstico 30 / 60 / 90" and estaciones_306090_disponibles
-    else estaciones_disponibles
-)
+if vista_principal == "Pronóstico 30 / 60 / 90":
+    estaciones_selector = estaciones_306090_disponibles
+    if not estaciones_selector:
+        st.warning(
+            "No hay estaciones con una salida 30/60/90 basada en al menos "
+            "10 análogos en la emisión vigente."
+        )
+        st.stop()
+else:
+    estaciones_selector = estaciones_disponibles
 
 if "estacion_sel" not in st.session_state:
     st.session_state.estacion_sel = estaciones_selector[0]
@@ -2428,7 +2492,7 @@ if vista_principal == "Pronóstico DWLT":
 
 else:
     if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
-        nombres_306090 = set(predicciones_306090["estacion"].apply(normalizar_texto).dropna())
+        nombres_306090 = estaciones_306090_norm
         estaciones_mapa_306090 = estaciones[
             estaciones["estacion"].apply(normalizar_texto).isin(nombres_306090)
         ].copy()

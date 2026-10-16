@@ -34,9 +34,10 @@ MAX_PESO_DIVERSIFICADO = 0.85
 ORIGENES_VALIDACION = 2
 # La persistencia es un miembro válido, pero es constante dentro del horizonte.
 # Si monopoliza EMOS, la línea publicada pierde toda evolución temporal aunque
-# existan miembros análogo/DTW con variación. Este límite evita ese colapso.
+# existan miembros análogo/DTW con variación. Este límite evita ese colapso y
+# conserva al menos la mitad de la señal dinámica disponible.
 UMBRAL_PESO_PERSISTENCIA_DEGENERADA = 0.95
-MAX_PESO_GUARD_PERSISTENCIA = 0.70
+MAX_PESO_GUARD_PERSISTENCIA = 0.50
 
 
 def cargar_modulo(nombre: str, archivo: str):

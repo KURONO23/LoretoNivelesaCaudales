@@ -42,9 +42,9 @@ VENTANAS = (30, 60, 90)
 K = 10
 CANDIDATE_STRIDE = 14
 METODO = "ANALOGO_ESTADO_V2_HIBRIDO_CLIMATOLOGIA"
-# ENAPU mezcla cotas absolutas y tirantes; no se debe aplicar el anclaje
-# automático de continuidad hasta que su serie esté homologada.
-ESTACIONES_SIN_CORRECCION_CONTINUIDAD = {"ENAPU"}
+# ENAPU ya fue homologada a tirantes relativos en Drive; comparte el anclaje
+# de continuidad con las demás estaciones.
+ESTACIONES_SIN_CORRECCION_CONTINUIDAD = set()
 
 
 def _metricas_basicas(observado: np.ndarray, predicho: np.ndarray) -> dict:
@@ -293,11 +293,7 @@ def pronosticar_estacion(
         if np.isfinite(a[origen_i]) and np.isfinite(nivel_seleccionado[0]):
             salto_inicial_original = float(nivel_seleccionado[0] - a[origen_i])
 
-            if estacion.upper() in ESTACIONES_SIN_CORRECCION_CONTINUIDAD:
-                estado = "EXCLUIDA_UNIDADES_MIXTAS"
-                continuidad_estado = "NO_CORREGIDO_UNIDADES_MIXTAS"
-                salto_inicial_final = salto_inicial_original
-            elif mejor is None:
+            if mejor is None:
                 continuidad_estado = "PERSISTENCIA_CONTINUA"
                 salto_inicial_final = float(nivel_seleccionado[0] - a[origen_i])
             else:

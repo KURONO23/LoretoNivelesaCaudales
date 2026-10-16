@@ -32,9 +32,6 @@ MIN_CALIBRACION = 24
 UMBRAL_EQUIVALENCIA_DTW = 0.95
 MAX_PESO_DIVERSIFICADO = 0.85
 ORIGENES_VALIDACION = 2
-# ENAPU contiene cotas y tirantes en la historia. Sus hindcasts no comparten
-# una escala verificable, por lo que EMOS no se publica hasta corregir la fuente.
-ESTACIONES_EXCLUIDAS_EMOS = {"ENAPU"}
 
 
 def cargar_modulo(nombre: str, archivo: str):
@@ -239,19 +236,6 @@ def construir_selector_dtw():
 
 
 def calibrar_estacion(base, selector_dtw, estacion: str, id_estacion: float, grupo: pd.DataFrame) -> dict[int, dict]:
-    if str(estacion).strip().upper() in ESTACIONES_EXCLUIDAS_EMOS:
-        return {
-            horizonte: {
-                "pesos": np.full(len(MIEMBROS), np.nan),
-                "intercepto": np.nan,
-                "n": 0,
-                "estado": "EXCLUIDO_UNIDADES_MIXTAS_ENAPU",
-                "metodo": "NO_PUBLICAR_HASTA_CORREGIR_UNIDADES",
-                "rmse_validacion": np.nan,
-                "rmse_legacy": np.nan,
-            }
-            for horizonte in HORIZONTES
-        }
     fechas, niveles = preparar_serie(grupo)
     errores = {h: [] for h in HORIZONTES}
     for indice in seleccionar_origenes(fechas, niveles):
@@ -317,9 +301,6 @@ def main() -> int:
                 X = preparar_miembros_emos(str(estacion), X)
                 emos = cal["intercepto"] + X @ pesos
                 bloque.loc[mask, "nivel_emos_m"] = emos
-                bloque.loc[mask, "estado_emos"] = cal["estado"]
-            elif str(estacion).strip().upper() in ESTACIONES_EXCLUIDAS_EMOS:
-                bloque.loc[mask, "nivel_emos_m"] = np.nan
                 bloque.loc[mask, "estado_emos"] = cal["estado"]
             else:
                 # Si aún no tiene suficientes ventanas retrospectivas completas de calibración,

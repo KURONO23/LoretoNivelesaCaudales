@@ -32,6 +32,11 @@ MIN_CALIBRACION = 24
 UMBRAL_EQUIVALENCIA_DTW = 0.95
 MAX_PESO_DIVERSIFICADO = 0.85
 ORIGENES_VALIDACION = 2
+# La persistencia es un miembro válido, pero es constante dentro del horizonte.
+# Si monopoliza EMOS, la línea publicada pierde toda evolución temporal aunque
+# existan miembros análogo/DTW con variación. Este límite evita ese colapso.
+UMBRAL_PESO_PERSISTENCIA_DEGENERADA = 0.95
+MAX_PESO_GUARD_PERSISTENCIA = 0.70
 
 
 def cargar_modulo(nombre: str, archivo: str):
@@ -192,6 +197,27 @@ def elegir_calibracion(matrices: list[np.ndarray]) -> dict:
     estado = estado_calibracion(pesos)
     if metodo == "SIMPLEX_DIVERSIFICADO":
         estado = "OK_CALIBRADO_DIVERSIFICADO"
+
+    # Persistencia no debe convertir EMOS en una recta cuando hay miembros
+    # dinámicos disponibles. Se aplica después del ajuste seleccionado para
+    # conservar la validación temporal como criterio principal y solo corregir
+    # el caso degenerado observado en Santa María de Nanay H+30.
+    variacion_dinamica = float(np.nanmax(np.nanstd(tabla[:, :3], axis=0)))
+    if (
+        np.isfinite(pesos).all()
+        and pesos[2] >= UMBRAL_PESO_PERSISTENCIA_DEGENERADA
+        and variacion_dinamica > 1e-3
+    ):
+        pesos_guard, intercepto_guard = ajustar_pesos_simplex(
+            tabla[:, :4], tabla[:, 4], MAX_PESO_GUARD_PERSISTENCIA
+        )
+        if np.isfinite(pesos_guard).all() and np.isfinite(intercepto_guard):
+            pesos = pesos_guard
+            intercepto = intercepto_guard
+            metodo = "SIMPLEX_GUARD_PERSISTENCIA"
+            estado = "OK_CALIBRADO_DIVERSIFICADO"
+            rmse_validacion = rmse(X_val, y_val, pesos, intercepto)
+
     return {"pesos": pesos, "intercepto": intercepto, "n": n, "estado": estado, "metodo": metodo, "rmse_validacion": rmse_validacion, "rmse_legacy": evaluados[0][3]}
 
 

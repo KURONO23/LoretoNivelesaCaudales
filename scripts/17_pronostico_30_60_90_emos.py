@@ -30,6 +30,11 @@ MAX_ORIGENES = 6
 ESPACIADO_ORIGENES_DIAS = 30
 MIN_CALIBRACION = 24
 UMBRAL_EQUIVALENCIA_DTW = 0.95
+MAX_PESO_DIVERSIFICADO = 0.85
+ORIGENES_VALIDACION = 2
+# ENAPU contiene cotas y tirantes en la historia. Sus hindcasts no comparten
+# una escala verificable, por lo que EMOS no se publica hasta corregir la fuente.
+ESTACIONES_EXCLUIDAS_EMOS = {"ENAPU"}
 
 
 def cargar_modulo(nombre: str, archivo: str):
@@ -82,6 +87,117 @@ def ajustar_pesos(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, float]:
     return pesos, intercepto
 
 
+def proyectar_pesos(v: np.ndarray, max_peso: float = 1.0) -> np.ndarray:
+    """Proyecta un vector sobre pesos no negativos que suman uno.
+
+    ``max_peso`` permite evaluar una alternativa diversificada sin inventar
+    miembros: cada peso sigue siendo una combinación convexa de los cuatro
+    pronósticos ya disponibles.
+    """
+    v = np.asarray(v, dtype=float)
+    if not (1.0 / len(v) <= max_peso <= 1.0):
+        raise ValueError("max_peso debe permitir que los pesos sumen uno")
+    bajo = float(np.min(v) - max_peso)
+    alto = float(np.max(v))
+    for _ in range(80):
+        umbral = (bajo + alto) / 2.0
+        pesos = np.clip(v - umbral, 0.0, max_peso)
+        if pesos.sum() > 1.0:
+            bajo = umbral
+        else:
+            alto = umbral
+    pesos = np.clip(v - alto, 0.0, max_peso)
+    return pesos / pesos.sum()
+
+
+def ajustar_pesos_simplex(X: np.ndarray, y: np.ndarray, max_peso: float = 1.0) -> tuple[np.ndarray, float]:
+    """Ajusta EMOS directamente en el simplex, con intercepto recalculado.
+
+    La rutina previa ajustaba una regresión libre y después truncaba sus
+    coeficientes negativos. Ese truncamiento no resuelve el problema
+    restringido y puede concentrar artificialmente todo el peso en un miembro.
+    """
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    mask = np.isfinite(y) & np.isfinite(X).all(axis=1)
+    if mask.sum() < MIN_CALIBRACION:
+        return np.full(len(MIEMBROS), np.nan), np.nan
+    X = X[mask]
+    y = y[mask]
+    X_centrado = X - X.mean(axis=0)
+    y_centrado = y - y.mean()
+    pesos = proyectar_pesos(np.full(X.shape[1], 1.0 / X.shape[1]), max_peso)
+    norma = float(np.linalg.norm(X_centrado, ord=2) ** 2)
+    paso = 1.0 / max(2.0 * norma / len(X), 1e-12)
+    for _ in range(2000):
+        gradiente = 2.0 * (X_centrado.T @ (X_centrado @ pesos - y_centrado)) / len(X)
+        nuevo = proyectar_pesos(pesos - paso * gradiente, max_peso)
+        if np.max(np.abs(nuevo - pesos)) < 1e-11:
+            pesos = nuevo
+            break
+        pesos = nuevo
+    intercepto = float(np.mean(y - X @ pesos))
+    return pesos, intercepto
+
+
+def rmse(X: np.ndarray, y: np.ndarray, pesos: np.ndarray, intercepto: float) -> float:
+    mask = np.isfinite(y) & np.isfinite(X).all(axis=1)
+    if not mask.any() or not np.isfinite(pesos).all() or not np.isfinite(intercepto):
+        return np.nan
+    return float(np.sqrt(np.mean((y[mask] - (intercepto + X[mask] @ pesos)) ** 2)))
+
+
+def preparar_miembros_emos(estacion: str, X: np.ndarray) -> np.ndarray:
+    """Devuelve miembros comparables en una misma escala por estación."""
+    miembros = np.asarray(X, dtype=float).copy()
+    return miembros
+
+
+def consolidar_pesos_estacion(estacion: str, pesos: np.ndarray) -> np.ndarray:
+    return np.asarray(pesos, dtype=float).copy()
+
+
+def elegir_calibracion(matrices: list[np.ndarray]) -> dict:
+    """Elige el ajuste por validación temporal, sin mezclar orígenes futuros.
+
+    Los dos orígenes más recientes se reservan para validar. La alternativa
+    diversificada solo se adopta si reduce el RMSE frente al método heredado;
+    en caso contrario se conserva el mejor modelo validado y queda trazado.
+    """
+    if not matrices:
+        nan = np.full(len(MIEMBROS), np.nan)
+        return {"pesos": nan, "intercepto": np.nan, "n": 0, "estado": "SIN_CALIBRACION_USA_VIGENTE", "metodo": "SIN_CALIBRACION", "rmse_validacion": np.nan, "rmse_legacy": np.nan}
+    tabla = np.vstack(matrices)
+    n = int(np.isfinite(tabla[:, 4]).sum())
+    if len(matrices) <= ORIGENES_VALIDACION:
+        pesos, intercepto = ajustar_pesos_simplex(tabla[:, :4], tabla[:, 4])
+        return {"pesos": pesos, "intercepto": intercepto, "n": n, "estado": estado_calibracion(pesos), "metodo": "SIMPLEX_SIN_VALIDACION", "rmse_validacion": np.nan, "rmse_legacy": np.nan}
+
+    entrenamiento = np.vstack(matrices[:-ORIGENES_VALIDACION])
+    validacion = np.vstack(matrices[-ORIGENES_VALIDACION:])
+    X_train, y_train = entrenamiento[:, :4], entrenamiento[:, 4]
+    X_val, y_val = validacion[:, :4], validacion[:, 4]
+    candidatos = [
+        ("LEGACY_TRUNCADO",) + ajustar_pesos(X_train, y_train),
+        ("SIMPLEX",) + ajustar_pesos_simplex(X_train, y_train),
+        ("SIMPLEX_DIVERSIFICADO",) + ajustar_pesos_simplex(X_train, y_train, MAX_PESO_DIVERSIFICADO),
+    ]
+    evaluados = [(nombre, pesos, intercepto, rmse(X_val, y_val, pesos, intercepto)) for nombre, pesos, intercepto in candidatos]
+    validos = [fila for fila in evaluados if np.isfinite(fila[3])]
+    elegido = min(validos, key=lambda fila: fila[3]) if validos else evaluados[0]
+    metodo, _, _, rmse_validacion = elegido
+    if metodo == "LEGACY_TRUNCADO":
+        pesos, intercepto = ajustar_pesos(tabla[:, :4], tabla[:, 4])
+    elif metodo == "SIMPLEX":
+        pesos, intercepto = ajustar_pesos_simplex(tabla[:, :4], tabla[:, 4])
+    else:
+        pesos, intercepto = ajustar_pesos_simplex(tabla[:, :4], tabla[:, 4], MAX_PESO_DIVERSIFICADO)
+    estado = estado_calibracion(pesos)
+    if metodo == "SIMPLEX_DIVERSIFICADO":
+        estado = "OK_CALIBRADO_DIVERSIFICADO"
+    return {"pesos": pesos, "intercepto": intercepto, "n": n, "estado": estado, "metodo": metodo, "rmse_validacion": rmse_validacion, "rmse_legacy": evaluados[0][3]}
+
+
 def estado_calibracion(pesos: np.ndarray) -> str:
     """Describe una calibración que colapsa en un único miembro.
 
@@ -123,6 +239,19 @@ def construir_selector_dtw():
 
 
 def calibrar_estacion(base, selector_dtw, estacion: str, id_estacion: float, grupo: pd.DataFrame) -> dict[int, dict]:
+    if str(estacion).strip().upper() in ESTACIONES_EXCLUIDAS_EMOS:
+        return {
+            horizonte: {
+                "pesos": np.full(len(MIEMBROS), np.nan),
+                "intercepto": np.nan,
+                "n": 0,
+                "estado": "EXCLUIDO_UNIDADES_MIXTAS_ENAPU",
+                "metodo": "NO_PUBLICAR_HASTA_CORREGIR_UNIDADES",
+                "rmse_validacion": np.nan,
+                "rmse_legacy": np.nan,
+            }
+            for horizonte in HORIZONTES
+        }
     fechas, niveles = preparar_serie(grupo)
     errores = {h: [] for h in HORIZONTES}
     for indice in seleccionar_origenes(fechas, niveles):
@@ -148,18 +277,9 @@ def calibrar_estacion(base, selector_dtw, estacion: str, id_estacion: float, gru
     resultado = {}
     for horizonte in HORIZONTES:
         matrices = errores[horizonte]
-        if matrices:
-            tabla = np.vstack(matrices)
-            pesos, intercepto = ajustar_pesos(tabla[:, :4], tabla[:, 4])
-            n = int(np.isfinite(tabla[:, 4]).sum())
-        else:
-            pesos, intercepto, n = np.full(len(MIEMBROS), np.nan), np.nan, 0
-        resultado[horizonte] = {
-            "pesos": pesos,
-            "intercepto": intercepto,
-            "n": n,
-            "estado": estado_calibracion(pesos),
-        }
+        matrices = [np.column_stack([preparar_miembros_emos(estacion, matriz[:, :4]), matriz[:, 4]]) for matriz in matrices]
+        resultado[horizonte] = elegir_calibracion(matrices)
+        resultado[horizonte]["pesos"] = consolidar_pesos_estacion(estacion, resultado[horizonte]["pesos"])
     return resultado
 
 
@@ -194,8 +314,12 @@ def main() -> int:
             pesos = cal["pesos"]
             if np.isfinite(pesos).all():
                 X = bloque.loc[mask, ["nivel_hibrido_m", "nivel_hibrido_dtw_m", "nivel_persistencia_m", "nivel_climatologia_m"]].to_numpy(dtype=float)
+                X = preparar_miembros_emos(str(estacion), X)
                 emos = cal["intercepto"] + X @ pesos
                 bloque.loc[mask, "nivel_emos_m"] = emos
+                bloque.loc[mask, "estado_emos"] = cal["estado"]
+            elif str(estacion).strip().upper() in ESTACIONES_EXCLUIDAS_EMOS:
+                bloque.loc[mask, "nivel_emos_m"] = np.nan
                 bloque.loc[mask, "estado_emos"] = cal["estado"]
             else:
                 # Si aún no tiene suficientes ventanas retrospectivas completas de calibración,
@@ -223,7 +347,7 @@ def main() -> int:
         salida.loc[mask_est, bloque.columns] = bloque
         for horizonte in HORIZONTES:
             cal = calibracion[horizonte]
-            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": cal["estado"]})
+            resumen.append({"estacion": estacion, "horizonte_dias": horizonte, "n_calibracion_emos": cal["n"], "peso_analogo": cal["pesos"][0], "peso_dtw": cal["pesos"][1], "peso_persistencia": cal["pesos"][2], "peso_climatologia": cal["pesos"][3], "estado_emos": cal["estado"], "metodo_calibracion_emos": cal["metodo"], "rmse_validacion_emos_m": cal["rmse_validacion"], "rmse_validacion_legacy_m": cal["rmse_legacy"]})
 
     salida["metodo_emos"] = "EMOS_LINEAL_EXPERIMENTAL"
     salida = salida.sort_values(["estacion", "horizonte_dias", "fecha_pronostico"]).reset_index(drop=True)

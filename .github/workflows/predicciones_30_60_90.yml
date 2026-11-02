@@ -80,7 +80,7 @@ jobs:
             echo "No cambió la salida diaria de predicciones."
           else
             git commit -m "Actualizar pronosticos 30 60 90"
-            git pull --rebase origin main
+            git pull --rebase -X theirs origin main
             git push origin main
           fi
 

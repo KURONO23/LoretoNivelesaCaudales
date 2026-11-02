@@ -95,7 +95,7 @@ jobs:
           else
             git commit -m "Actualizar cache, DWLT, pronostico, historico y validacion Loreto"
 
-            git pull --rebase origin main
+            git pull --rebase -X theirs origin main
 
             git push origin main
           fi

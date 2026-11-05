@@ -1,21 +1,21 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-11-04,2026-11-04,6.18,9.248,-3.068,6.18,0.0,0,Sí,Offset alto: -3.07 m. Revisar estación.
-Bellavista,9036028,2026-11-04,2026-11-04,3.34,7.463,-4.123,3.34,0.0,0,Sí,Offset alto: -4.12 m. Revisar estación.
-Timicurillo,9036459,2026-11-04,2026-11-03,6.77,8.165,-1.395,6.77,0.0,1,Sí,Ajuste aplicado
-Puerto Almendra,9037610,2026-11-04,2026-11-04,3.6,8.961,-5.361,3.6,-0.0,0,Sí,Offset alto: -5.36 m. Revisar estación.
-Santa María de Nanay,9037738,2026-11-04,2026-11-04,4.4,8.306,-3.906,4.4,0.0,0,Sí,Offset alto: -3.91 m. Revisar estación.
-ENAPU,9038134,2026-11-04,2026-11-04,4.88,8.308,-3.428,4.88,0.0,0,Sí,Offset alto: -3.43 m. Revisar estación.
-Tamshiyacu,9038269,2026-11-04,2026-11-04,2.61,4.392,-1.782,2.61,0.0,0,Sí,Offset alto: -1.78 m. Revisar estación.
-Puerto Alegria,9038835,2026-11-04,2026-11-04,10.24,11.754,-1.514,10.24,0.0,0,Sí,Offset alto: -1.51 m. Revisar estación.
-Santa Rosa,9039635,2026-11-04,2026-11-04,3.6,6.067,-2.467,3.6,0.0,0,Sí,Offset alto: -2.47 m. Revisar estación.
-Borja,9040208,2026-11-04,2026-11-04,4.28,7.441,-3.161,4.28,0.0,0,Sí,Offset alto: -3.16 m. Revisar estación.
-San Regis,9040439,2026-11-04,2026-11-04,5.99,5.734,0.256,5.99,0.0,0,Sí,Ajuste aplicado
-Nauta,9040454,2026-11-04,2026-11-04,6.36,9.793,-3.433,6.36,0.0,0,Sí,Offset alto: -3.43 m. Revisar estación.
-San Lorenzo,9042153,2026-11-04,2025-09-30,7.19,13.91,,13.91,,400,No,Observado muy antiguo para ajuste: 400 días
-Genaro Herrera,9042214,2026-11-04,2026-11-04,7.68,7.036,0.644,7.68,0.0,0,Sí,Ajuste aplicado
-Angamos,9043370,2026-11-04,2026-11-04,3.1,14.292,-11.192,3.1,-0.0,0,Sí,Offset alto: -11.19 m. Revisar estación.
-Requena,9043425,2026-11-04,2026-11-04,6.48,9.651,-3.171,6.48,0.0,0,Sí,Offset alto: -3.17 m. Revisar estación.
-Lagunas,9043597,2026-11-04,2026-11-04,7.05,7.716,-0.666,7.05,0.0,0,Sí,Ajuste aplicado
-Flor de Punga,9044756,2026-11-04,2026-05-14,22.8,10.09,,10.09,,174,No,Observado muy antiguo para ajuste: 174 días
-Yurimaguas,9046779,2026-11-04,2026-11-04,131.7,132.114,-0.414,131.7,0.0,0,Sí,Ajuste aplicado
-Contamana,9053555,2026-11-04,2026-11-04,10.2,8.982,1.218,10.2,0.0,0,Sí,Ajuste aplicado
+Santa Clotilde,9032282,2026-11-05,2026-11-05,6.18,9.435,-3.255,6.18,0.0,0,Sí,Offset alto: -3.26 m. Revisar estación.
+Bellavista,9036028,2026-11-05,2026-11-05,3.39,6.569,-3.179,3.39,0.0,0,Sí,Offset alto: -3.18 m. Revisar estación.
+Timicurillo,9036459,2026-11-05,2026-11-04,7.1,11.068,-3.968,7.1,0.0,1,Sí,Offset alto: -3.97 m. Revisar estación.
+Puerto Almendra,9037610,2026-11-05,2026-11-05,3.5,8.527,-5.027,3.5,0.0,0,Sí,Offset alto: -5.03 m. Revisar estación.
+Santa María de Nanay,9037738,2026-11-05,2026-11-05,4.4,8.373,-3.973,4.4,0.0,0,Sí,Offset alto: -3.97 m. Revisar estación.
+ENAPU,9038134,2026-11-05,2026-11-05,5.04,8.165,-3.125,5.04,0.0,0,Sí,Offset alto: -3.12 m. Revisar estación.
+Tamshiyacu,9038269,2026-11-05,2026-11-05,2.82,6.077,-3.257,2.82,0.0,0,Sí,Offset alto: -3.26 m. Revisar estación.
+Puerto Alegria,9038835,2026-11-05,2026-11-05,10.2,13.826,-3.626,10.2,0.0,0,Sí,Offset alto: -3.63 m. Revisar estación.
+Santa Rosa,9039635,2026-11-05,2026-11-05,3.58,6.26,-2.68,3.58,0.0,0,Sí,Offset alto: -2.68 m. Revisar estación.
+Borja,9040208,2026-11-05,2026-11-05,4.12,7.635,-3.515,4.12,0.0,0,Sí,Offset alto: -3.52 m. Revisar estación.
+San Regis,9040439,2026-11-05,2026-11-05,6.1,4.448,1.652,6.1,0.0,0,Sí,Offset alto: 1.65 m. Revisar estación.
+Nauta,9040454,2026-11-05,2026-11-05,6.51,12.091,-5.581,6.51,0.0,0,Sí,Offset alto: -5.58 m. Revisar estación.
+San Lorenzo,9042153,2026-11-05,2025-09-30,7.19,13.91,,13.91,,401,No,Observado muy antiguo para ajuste: 401 días
+Genaro Herrera,9042214,2026-11-05,2026-11-05,8.03,8.691,-0.661,8.03,0.0,0,Sí,Ajuste aplicado
+Angamos,9043370,2026-11-05,2026-11-05,3.16,15.953,-12.793,3.16,0.0,0,Sí,Offset alto: -12.79 m. Revisar estación.
+Requena,9043425,2026-11-05,2026-11-05,6.93,10.724,-3.794,6.93,0.0,0,Sí,Offset alto: -3.79 m. Revisar estación.
+Lagunas,9043597,2026-11-05,2026-11-05,6.98,7.845,-0.865,6.98,0.0,0,Sí,Ajuste aplicado
+Flor de Punga,9044756,2026-11-05,2026-05-14,22.8,10.142,,10.142,,175,No,Observado muy antiguo para ajuste: 175 días
+Yurimaguas,9046779,2026-11-05,2026-11-04,131.7,132.86,-1.16,131.7,0.0,1,Sí,Ajuste aplicado
+Contamana,9053555,2026-11-05,2026-11-05,9.96,8.506,1.454,9.96,0.0,0,Sí,Ajuste aplicado

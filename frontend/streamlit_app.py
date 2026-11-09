@@ -8,8 +8,6 @@ from pathlib import Path
 
 from PIL import Image
 import folium
-from branca.element import MacroElement
-from jinja2 import Template
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -1123,53 +1121,23 @@ def calcular_metricas_validacion(df_comp: pd.DataFrame) -> dict:
 # MAPA
 # ============================================================
 
-class LeafletAutoFitBounds(MacroElement):
-    """Fuerza a Leaflet a invalidar tamaño y encuadrar tras el montaje inicial del iframe."""
-
-    def __init__(self, bounds: list[list[float]]):
-        super().__init__()
-        self.bounds = bounds
-        self._template = Template("""
-        {% macro script(this, kwargs) %}
-            setTimeout(function() {
-                var mapObj = typeof {{this._parent.get_name()}} !== 'undefined' ? {{this._parent.get_name()}} : (window.map || null);
-                if (mapObj && mapObj.invalidateSize) {
-                    mapObj.invalidateSize();
-                    try {
-                        mapObj.fitBounds({{this.bounds}});
-                    } catch (e) {}
-                }
-            }, 200);
-        {% endmacro %}
-        """)
-
-
 def crear_mapa_estaciones(
     estaciones: pd.DataFrame,
     estacion_sel: str,
     comid_sel,
     pron_resumen: pd.DataFrame,
 ) -> folium.Map:
-    # Calcular centroide geográfico real de las estaciones de Loreto
-    lats_validas = pd.to_numeric(estaciones.get("lat"), errors="coerce").dropna() if not estaciones.empty else pd.Series(dtype=float)
-    lons_validas = pd.to_numeric(estaciones.get("lon"), errors="coerce").dropna() if not estaciones.empty else pd.Series(dtype=float)
-    if not lats_validas.empty and not lons_validas.empty:
-        lat_centro = float((lats_validas.min() + lats_validas.max()) / 2.0)
-        lon_centro = float((lons_validas.min() + lons_validas.max()) / 2.0)
-    else:
-        lat_centro, lon_centro = -4.92, -73.75
-
+    # Centro geográfico fijo y óptimo para toda la red de Loreto.
+    # Abarca exactamente desde Santa Clotilde (-2.48°) al norte hasta Contamana (-7.35°) al sur,
+    # y desde Borja (-77.55°) al oeste hasta Santa Rosa (-69.95°) al este.
+    # El zoom fijo 6 evita fallos de encuadre por dimensiones no calculadas del iframe al cargar.
     mapa = folium.Map(
-        location=[lat_centro, lon_centro],
+        location=[-4.90, -73.75],
         zoom_start=6,
         # OpenStreetMap no requiere una clave de API para el visor.
-        # CartoDB estaba devolviendo "API KEY REQUIRED" en producción.
         tiles="OpenStreetMap",
         control_scale=True,
     )
-
-    # Lista para calcular el encuadre automático del mapa
-    puntos_validos = []
 
     if not estaciones.empty:
         for _, row in estaciones.iterrows():
@@ -1180,8 +1148,6 @@ def crear_mapa_estaciones(
 
             if pd.isna(lat) or pd.isna(lon) or pd.isna(comid):
                 continue
-
-            puntos_validos.append([float(lat), float(lon)])
 
             comid_int = int(comid)
             seleccionado = comid_sel is not None and comid_int == int(comid_sel)
@@ -1240,35 +1206,6 @@ def crear_mapa_estaciones(
                 interactive=False,
             ).add_to(mapa)
 
-    # ------------------------------------------------------------
-    # Encuadre automático a las estaciones de Loreto
-    # ------------------------------------------------------------
-    # Esto evita que el mapa cargue mostrando demasiado territorio
-    # y enfoca la vista inicial en el conjunto real de estaciones.
-    if puntos_validos:
-        try:
-            lats = [p[0] for p in puntos_validos]
-            lons = [p[1] for p in puntos_validos]
-
-            lat_min = min(lats)
-            lat_max = max(lats)
-            lon_min = min(lons)
-            lon_max = max(lons)
-
-            # Margen visual moderado enfocado en la red de Loreto
-            margen_lat = max((lat_max - lat_min) * 0.05, 0.12)
-            margen_lon = max((lon_max - lon_min) * 0.05, 0.12)
-
-            bounds = [
-                [round(lat_min - margen_lat, 4), round(lon_min - margen_lon, 4)],
-                [round(lat_max + margen_lat, 4), round(lon_max + margen_lon, 4)],
-            ]
-
-            mapa.fit_bounds(bounds)
-            mapa.add_child(LeafletAutoFitBounds(bounds))
-        except Exception:
-            pass
-
     return mapa
 
 
@@ -1279,7 +1216,7 @@ def renderizar_mapa_operativo(
     pron_resumen: pd.DataFrame,
     comid_a_estacion: dict,
     key: str,
-    height: int = 540,
+    height: int = 560,
 ) -> None:
     """Renderiza un mapa contextual y conserva la selección por marcador."""
     st.markdown(
@@ -2508,7 +2445,7 @@ if vista_principal == "Pronóstico DWLT":
             pron_resumen=pron_resumen,
             comid_a_estacion=comid_a_estacion,
             key="mapa_estaciones_dwlt",
-            height=630,
+            height=560,
         )
 
     with col_panel_dwlt:

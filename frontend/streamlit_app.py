@@ -1294,9 +1294,7 @@ def renderizar_mapa_operativo(
         and comid_click != st.session_state.ultimo_click_comid
     ):
         st.session_state.ultimo_click_comid = comid_click
-        nueva_estacion = comid_a_estacion[comid_click]
-        st.session_state.estacion_sel = nueva_estacion
-        st.session_state.selector_estacion_main = nueva_estacion
+        st.session_state.estacion_sel = comid_a_estacion[comid_click]
         st.rerun()
 
 
@@ -2447,7 +2445,6 @@ with col_ctrl_estacion:
         "Estación hidrométrica",
         estaciones_selector,
         index=index_actual,
-        key="selector_estacion_main",
         label_visibility="collapsed",
     )
     if estacion_elegida != st.session_state.estacion_sel:

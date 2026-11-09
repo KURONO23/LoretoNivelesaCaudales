@@ -2402,7 +2402,11 @@ if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
 else:
     estaciones_306090_disponibles = []
 
-col_ctrl_vista, col_ctrl_estacion = st.columns([1.5, 1.2], gap="large")
+col_ctrl_vista, col_spacer, col_label_estacion, col_ctrl_estacion = st.columns(
+    [1.4, 0.4, 0.7, 0.9],
+    vertical_alignment="center",
+    gap="small",
+)
 
 with col_ctrl_vista:
     if hasattr(st, "segmented_control"):
@@ -2438,6 +2442,16 @@ if "estacion_sel" not in st.session_state or st.session_state.estacion_sel not i
 
 if "ultimo_click_comid" not in st.session_state:
     st.session_state.ultimo_click_comid = None
+
+with col_label_estacion:
+    st.markdown(
+        """
+        <div style="font-weight: 700; color: #1e293b; font-size: 0.92rem; text-align: right; white-space: nowrap;">
+            Selector de estaciones:
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 with col_ctrl_estacion:
     index_actual = estaciones_selector.index(st.session_state.estacion_sel)

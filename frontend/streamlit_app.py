@@ -1966,24 +1966,6 @@ def graficar_pronostico_306090(
     k3.metric("Análogos utilizados", formato_num(n_analogos, 0))
     k4.metric("Distancia media", formato_num(distancia, 3))
 
-    estado_normalizado = normalizar_texto(estado)
-    mensaje_estado = f"Estado del horizonte H+{horizonte_sel}: **{estado}** · Modelo: `{modelo}`"
-    if "EXCLUIDA" in estado_normalizado:
-        if "ENAPU" in normalizar_texto(estacion_sel):
-            # ENAPU ya tiene datos subsanados y se integra con la serie continua
-            st.info(
-                f"Estado del horizonte H+{horizonte_sel}: **OK_SUBSANADO** · Modelo: `{modelo}`. "
-                "Serie subsanada en escala local."
-            )
-        else:
-            st.warning(mensaje_estado)
-    elif "OK" in estado_normalizado:
-        st.success(mensaje_estado)
-    elif "FALLBACK" in estado_normalizado:
-        st.warning(mensaje_estado)
-    else:
-        st.info(mensaje_estado)
-
     st.markdown(
         f'<div class="section-title">Nivel observado y pronóstico por análogos — horizonte de {horizonte_sel} días</div>',
         unsafe_allow_html=True,
@@ -2235,28 +2217,6 @@ def graficar_pronostico_306090(
         "La banda azul representa "
         "P10–P90 del método vigente."
     )
-
-    st.markdown('<div class="section-title">Comparación de los tres horizontes</div>', unsafe_allow_html=True)
-    tarjetas = st.columns(3)
-    for tarjeta, horizonte in zip(tarjetas, [30, 60, 90]):
-        tmp = pred_est[pred_est["horizonte_dias"] == horizonte].sort_values("fecha_pronostico")
-        if tmp.empty:
-            tarjeta.info(f"H+{horizonte}: sin datos")
-            continue
-        tmp = tmp.copy()
-        col_tmp = "nivel_hibrido_m" if "nivel_hibrido_m" in tmp.columns else "nivel_pronosticado_m"
-        tmp[col_tmp] = pd.to_numeric(tmp[col_tmp], errors="coerce")
-        tmp_ok = tmp.dropna(subset=[col_tmp])
-        fin = tmp_ok.iloc[-1] if not tmp_ok.empty else pd.Series(dtype=object)
-        estado_tmp = str(tmp["estado"].dropna().iloc[0]) if "estado" in tmp and tmp["estado"].notna().any() else "Sin dato"
-        tarjeta.metric(f"H+{horizonte}", f"{formato_num(fin.get(col_tmp, np.nan))} m")
-        tarjeta.caption(
-            f"P10–P90: {formato_num(fin.get('p10_m', np.nan))}–{formato_num(fin.get('p90_m', np.nan))} m\n\n"
-            f"Estado: {estado_tmp}"
-        )
-
-    # Se omiten la tabla extensa y la trazabilidad desplegable para mantener
-    # la vista operativa compacta y evitar desplazamiento vertical innecesario.
 
 
 # ============================================================

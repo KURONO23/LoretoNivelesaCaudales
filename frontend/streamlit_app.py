@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image
 import folium
+from branca.element import MacroElement
+from jinja2 import Template
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -1121,29 +1123,50 @@ def calcular_metricas_validacion(df_comp: pd.DataFrame) -> dict:
 # MAPA
 # ============================================================
 
+class LeafletAutoFitBounds(MacroElement):
+    """Fuerza a Leaflet a invalidar tamaño y encuadrar tras el montaje inicial del iframe."""
+
+    def __init__(self, bounds: list[list[float]]):
+        super().__init__()
+        self.bounds = bounds
+        self._template = Template("""
+        {% macro script(this, kwargs) %}
+            setTimeout(function() {
+                var mapObj = typeof {{this._parent.get_name()}} !== 'undefined' ? {{this._parent.get_name()}} : (window.map || null);
+                if (mapObj && mapObj.invalidateSize) {
+                    mapObj.invalidateSize();
+                    try {
+                        mapObj.fitBounds({{this.bounds}});
+                    } catch (e) {}
+                }
+            }, 200);
+        {% endmacro %}
+        """)
+
+
 def crear_mapa_estaciones(
     estaciones: pd.DataFrame,
     estacion_sel: str,
     comid_sel,
     pron_resumen: pd.DataFrame,
 ) -> folium.Map:
-    if estaciones.empty:
-        mapa = folium.Map(
-            location=[-5.0, -74.5],
-            zoom_start=6,
-            # OpenStreetMap no requiere una clave de API para el visor.
-            # CartoDB estaba devolviendo "API KEY REQUIRED" en producción.
-            tiles="OpenStreetMap",
-            control_scale=True,
-        )
+    # Calcular centroide geográfico real de las estaciones de Loreto
+    lats_validas = pd.to_numeric(estaciones.get("lat"), errors="coerce").dropna() if not estaciones.empty else pd.Series(dtype=float)
+    lons_validas = pd.to_numeric(estaciones.get("lon"), errors="coerce").dropna() if not estaciones.empty else pd.Series(dtype=float)
+    if not lats_validas.empty and not lons_validas.empty:
+        lat_centro = float((lats_validas.min() + lats_validas.max()) / 2.0)
+        lon_centro = float((lons_validas.min() + lons_validas.max()) / 2.0)
     else:
-        mapa = folium.Map(
-            location=[estaciones["lat"].mean(), estaciones["lon"].mean()],
-            zoom_start=7,
-            # Mantener el mismo proveedor en el encuadre normal y vacío.
-            tiles="OpenStreetMap",
-            control_scale=True,
-        )
+        lat_centro, lon_centro = -4.92, -73.75
+
+    mapa = folium.Map(
+        location=[lat_centro, lon_centro],
+        zoom_start=6,
+        # OpenStreetMap no requiere una clave de API para el visor.
+        # CartoDB estaba devolviendo "API KEY REQUIRED" en producción.
+        tiles="OpenStreetMap",
+        control_scale=True,
+    )
 
     # Lista para calcular el encuadre automático del mapa
     puntos_validos = []
@@ -1232,16 +1255,17 @@ def crear_mapa_estaciones(
             lon_min = min(lons)
             lon_max = max(lons)
 
-            # Margen visual para que los puntos no queden pegados al borde
-            margen_lat = max((lat_max - lat_min) * 0.12, 0.20)
-            margen_lon = max((lon_max - lon_min) * 0.12, 0.20)
+            # Margen visual moderado enfocado en la red de Loreto
+            margen_lat = max((lat_max - lat_min) * 0.05, 0.12)
+            margen_lon = max((lon_max - lon_min) * 0.05, 0.12)
 
-            mapa.fit_bounds(
-                [
-                    [lat_min - margen_lat, lon_min - margen_lon],
-                    [lat_max + margen_lat, lon_max + margen_lon],
-                ]
-            )
+            bounds = [
+                [round(lat_min - margen_lat, 4), round(lon_min - margen_lon, 4)],
+                [round(lat_max + margen_lat, 4), round(lon_max + margen_lon, 4)],
+            ]
+
+            mapa.fit_bounds(bounds)
+            mapa.add_child(LeafletAutoFitBounds(bounds))
         except Exception:
             pass
 
@@ -2484,6 +2508,7 @@ if vista_principal == "Pronóstico DWLT":
             pron_resumen=pron_resumen,
             comid_a_estacion=comid_a_estacion,
             key="mapa_estaciones_dwlt",
+            height=630,
         )
 
     with col_panel_dwlt:

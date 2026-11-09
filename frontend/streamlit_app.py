@@ -23,6 +23,7 @@ st.set_page_config(
     page_title="AMARU",
     page_icon="🌊",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -81,13 +82,10 @@ st.markdown(
         max-width: 100% !important;
     }
 
-    section[data-testid="stSidebar"] {
-        background: #f3f7fb;
-        border-right: 1px solid #dbe4ef;
-    }
-
-    section[data-testid="stSidebar"] > div {
-        padding-top: 1.05rem;
+    [data-testid="stSidebar"],
+    [data-testid="stSidebarCollapsedControl"],
+    button[kind="header"] {
+        display: none !important;
     }
 
     /* ============================================================
@@ -1273,7 +1271,7 @@ def renderizar_mapa_operativo(
 
     mapa_evento = st_folium(
         mapa,
-        width=520,
+        use_container_width=True,
         height=540,
         key=key,
         returned_objects=["last_object_clicked_tooltip"],
@@ -1296,7 +1294,9 @@ def renderizar_mapa_operativo(
         and comid_click != st.session_state.ultimo_click_comid
     ):
         st.session_state.ultimo_click_comid = comid_click
-        st.session_state.estacion_sel = comid_a_estacion[comid_click]
+        nueva_estacion = comid_a_estacion[comid_click]
+        st.session_state.estacion_sel = nueva_estacion
+        st.session_state.selector_estacion_main = nueva_estacion
         st.rerun()
 
 
@@ -2404,22 +2404,25 @@ if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:
 else:
     estaciones_306090_disponibles = []
 
-if hasattr(st, "segmented_control"):
-    vista_principal = st.segmented_control(
-        "Vista del visor",
-        options=["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
-        default="Pronóstico DWLT",
-        key="vista_principal",
-        label_visibility="collapsed",
-    )
-else:
-    vista_principal = st.radio(
-        "Vista del visor",
-        ["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
-        horizontal=True,
-        key="vista_principal",
-        label_visibility="collapsed",
-    )
+col_ctrl_vista, col_ctrl_estacion = st.columns([1.5, 1.2], gap="large")
+
+with col_ctrl_vista:
+    if hasattr(st, "segmented_control"):
+        vista_principal = st.segmented_control(
+            "Vista del visor",
+            options=["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
+            default="Pronóstico DWLT",
+            key="vista_principal",
+            label_visibility="collapsed",
+        )
+    else:
+        vista_principal = st.radio(
+            "Vista del visor",
+            ["Pronóstico DWLT", "Pronóstico 30 / 60 / 90"],
+            horizontal=True,
+            key="vista_principal",
+            label_visibility="collapsed",
+        )
 
 if vista_principal == "Pronóstico 30 / 60 / 90":
     estaciones_selector = estaciones_306090_disponibles
@@ -2432,62 +2435,24 @@ if vista_principal == "Pronóstico 30 / 60 / 90":
 else:
     estaciones_selector = estaciones_disponibles
 
-if "estacion_sel" not in st.session_state:
+if "estacion_sel" not in st.session_state or st.session_state.estacion_sel not in estaciones_selector:
     st.session_state.estacion_sel = estaciones_selector[0]
 
 if "ultimo_click_comid" not in st.session_state:
     st.session_state.ultimo_click_comid = None
 
-if st.session_state.estacion_sel not in estaciones_selector:
-    st.session_state.estacion_sel = estaciones_selector[0]
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-    st.header("Filtros")
-
-    modo = st.radio(
-        "Modo de visualización",
-        [
-            "Pronóstico actual",
-            "Validación histórica",
-        ],
-    )
-
+with col_ctrl_estacion:
     index_actual = estaciones_selector.index(st.session_state.estacion_sel)
-
-    estacion_sidebar = st.selectbox(
-        "Estación",
+    estacion_elegida = st.selectbox(
+        "Estación hidrométrica",
         estaciones_selector,
         index=index_actual,
-        key="selector_estacion_sidebar",
+        key="selector_estacion_main",
+        label_visibility="collapsed",
     )
-
-    st.session_state.estacion_sel = estacion_sidebar
-
-    st.markdown("---")
-    st.subheader("Archivos cargados")
-
-    checks = {
-        "GPKG estaciones": not estaciones.empty,
-        "pronóstico actual CSV": not pron.empty,
-        "diagnóstico ajuste CSV": not diagnostico.empty,
-        "métricas Parquet": not metricas.empty,
-        "observado Parquet": not obs.empty,
-        "histórico pronósticos AH": historico_ok,
-        "pronósticos 30/60/90": not predicciones_306090.empty,
-    }
-
-    for nombre, ok in checks.items():
-        st.write(("✅ " if ok else "❌ ") + nombre)
-
-    if modo == "Validación histórica" and not historico_ok:
-        st.warning("Aún no existe histórico. Ejecuta primero el workflow con el script 04 actualizado.")
-
-    st.caption("Puedes seleccionar estaciones desde el selector o haciendo click en el mapa.")
+    if estacion_elegida != st.session_state.estacion_sel:
+        st.session_state.estacion_sel = estacion_elegida
+        st.rerun()
 
 
 # ============================================================
@@ -2560,78 +2525,66 @@ if vista_principal == "Pronóstico DWLT":
             unsafe_allow_html=True,
         )
 
-        if modo == "Pronóstico actual":
-            nivel_obs_reciente = None
-            obs_d = observado_diario(obs_est)
+        nivel_obs_reciente = None
+        obs_d = observado_diario(obs_est)
 
-            if not obs_d.empty:
-                nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
+        if not obs_d.empty:
+            nivel_obs_reciente = obs_d["nivel_m"].iloc[-1]
 
-            nivel_inicio = None
-            nivel_fin = None
-            tendencia_val = None
+        nivel_inicio = None
+        nivel_fin = None
+        tendencia_val = None
 
-            if not pron_est.empty:
-                serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
+        if not pron_est.empty:
+            serie_prom = pron_est["nivel_prom_ajustado_m"].dropna()
 
-                if not serie_prom.empty:
-                    nivel_inicio = serie_prom.iloc[0]
-                    nivel_fin = serie_prom.iloc[-1]
-                    tendencia_val = nivel_fin - nivel_inicio
+            if not serie_prom.empty:
+                nivel_inicio = serie_prom.iloc[0]
+                nivel_fin = serie_prom.iloc[-1]
+                tendencia_val = nivel_fin - nivel_inicio
 
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Nivel observado reciente", f"{formato_num(nivel_obs_reciente)} m")
-            k2.metric("Nivel pronosticado ajustado", f"{formato_num(nivel_fin)} m")
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Nivel observado reciente", f"{formato_num(nivel_obs_reciente)} m")
+        k2.metric("Nivel pronosticado ajustado", f"{formato_num(nivel_fin)} m")
 
-            tendencia_txt = clasificar_tendencia(tendencia_val)
+        tendencia_txt = clasificar_tendencia(tendencia_val)
 
-            if tendencia_val is None or pd.isna(tendencia_val):
-                tendencia_color = "#64748b"
-                tendencia_flecha = ""
-                tendencia_delta = ""
-            elif tendencia_val > 0:
-                tendencia_color = "#16a34a"
-                tendencia_flecha = "↑"
-                tendencia_delta = f"{formato_num(tendencia_val)} m"
-            elif tendencia_val < 0:
-                tendencia_color = "#dc2626"
-                tendencia_flecha = "↓"
-                tendencia_delta = f"{formato_num(abs(tendencia_val))} m"
-            else:
-                tendencia_color = "#2563eb"
-                tendencia_flecha = "→"
-                tendencia_delta = f"{formato_num(tendencia_val)} m"
-
-            with k3:
-                st.markdown(
-                    f"""
-                    <div class="stMetric">
-                        <div style="font-size:0.78rem;color:#334155;font-weight:600;line-height:1.15;">
-                            Tendencia esperada
-                        </div>
-                        <div style="font-size:1.15rem;font-weight:800;color:#0f172a;line-height:1.20;margin-top:6px;">
-                            {tendencia_txt}
-                            <span style="color:{tendencia_color};font-size:0.78rem;font-weight:800;margin-left:8px;white-space:nowrap;">
-                                {tendencia_flecha} {tendencia_delta}
-                            </span>
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-            graficar_pronostico_actual(pron_est=pron_est, obs_est=obs_est)
-
+        if tendencia_val is None or pd.isna(tendencia_val):
+            tendencia_color = "#64748b"
+            tendencia_flecha = ""
+            tendencia_delta = ""
+        elif tendencia_val > 0:
+            tendencia_color = "#16a34a"
+            tendencia_flecha = "↑"
+            tendencia_delta = f"{formato_num(tendencia_val)} m"
+        elif tendencia_val < 0:
+            tendencia_color = "#dc2626"
+            tendencia_flecha = "↓"
+            tendencia_delta = f"{formato_num(abs(tendencia_val))} m"
         else:
-            st.info(
-                "Modo de validación histórica: selecciona una fecha de emisión para comparar "
-                "el pronóstico guardado contra el nivel observado real."
+            tendencia_color = "#2563eb"
+            tendencia_flecha = "→"
+            tendencia_delta = f"{formato_num(tendencia_val)} m"
+
+        with k3:
+            st.markdown(
+                f"""
+                <div class="stMetric">
+                    <div style="font-size:0.78rem;color:#334155;font-weight:600;line-height:1.15;">
+                        Tendencia esperada
+                    </div>
+                    <div style="font-size:1.15rem;font-weight:800;color:#0f172a;line-height:1.20;margin-top:6px;">
+                        {tendencia_txt}
+                        <span style="color:{tendencia_color};font-size:0.78rem;font-weight:800;margin-left:8px;white-space:nowrap;">
+                            {tendencia_flecha} {tendencia_delta}
+                        </span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-            if not historico_ok:
-                st.warning("Todavía no existe archivo histórico. Ejecuta el workflow actualizado.")
-            else:
-                graficar_validacion_historica(hist_est=hist_est, obs_est=obs_est)
+        graficar_pronostico_actual(pron_est=pron_est, obs_est=obs_est)
 
 else:
     if not predicciones_306090.empty and "estacion" in predicciones_306090.columns:

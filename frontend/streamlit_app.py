@@ -1255,6 +1255,7 @@ def renderizar_mapa_operativo(
     pron_resumen: pd.DataFrame,
     comid_a_estacion: dict,
     key: str,
+    height: int = 540,
 ) -> None:
     """Renderiza un mapa contextual y conserva la selección por marcador."""
     st.markdown(
@@ -1272,7 +1273,7 @@ def renderizar_mapa_operativo(
     mapa_evento = st_folium(
         mapa,
         use_container_width=True,
-        height=540,
+        height=height,
         key=key,
         returned_objects=["last_object_clicked_tooltip"],
     )
@@ -2601,6 +2602,7 @@ else:
             pron_resumen=pron_resumen,
             comid_a_estacion=comid_a_estacion,
             key="mapa_estaciones_306090",
+            height=730,
         )
         st.caption(
             f"Se muestran {len(estaciones_mapa_306090)} estaciones con salida 30/60/90 vigente."

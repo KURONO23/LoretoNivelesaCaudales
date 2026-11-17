@@ -1,19 +1,19 @@
 ﻿estacion,comid,fecha_inicio_pronostico,fecha_obs_usada,nivel_obs_usado,primer_nivel_bruto,offset_aplicado,primer_nivel_ajustado,diferencia_control_m,dias_desde_obs,ajuste_continuidad,advertencia_ajuste
-Santa Clotilde,9032282,2026-11-15,2026-11-13,6.47,9.478,-3.008,6.47,0.0,2,Sí,Offset alto: -3.01 m. Revisar estación.
-Bellavista,9036028,2026-11-15,2026-11-13,3.58,4.82,-1.24,3.58,0.0,2,Sí,Ajuste aplicado
-Timicurillo,9036459,2026-11-15,2026-11-12,7.87,13.079,-5.209,7.87,0.0,3,Sí,Offset alto: -5.21 m. Revisar estación.
-Puerto Almendra,9037610,2026-11-15,2026-11-13,3.52,7.139,-3.619,3.52,0.0,2,Sí,Offset alto: -3.62 m. Revisar estación.
-Santa María de Nanay,9037738,2026-11-15,2026-11-13,3.84,7.233,-3.393,3.84,0.0,2,Sí,Offset alto: -3.39 m. Revisar estación.
-ENAPU,9038134,2026-11-15,2026-11-13,5.58,7.544,-1.964,5.58,0.0,2,Sí,Offset alto: -1.96 m. Revisar estación.
-Tamshiyacu,9038269,2026-11-15,2026-11-13,3.3,8.035,-4.735,3.3,0.0,2,Sí,Offset alto: -4.74 m. Revisar estación.
-Puerto Alegria,9038835,2026-11-15,2026-11-13,10.92,16.195,-5.275,10.92,0.0,2,Sí,Offset alto: -5.28 m. Revisar estación.
-Santa Rosa,9039635,2026-11-15,2026-11-13,4.28,9.347,-5.067,4.28,0.0,2,Sí,Offset alto: -5.07 m. Revisar estación.
-Borja,9040208,2026-11-15,2026-11-13,4.4,7.036,-2.636,4.4,0.0,2,Sí,Offset alto: -2.64 m. Revisar estación.
-San Regis,9040439,2026-11-15,2026-11-15,5.92,7.916,-1.996,5.92,0.0,0,Sí,Offset alto: -2.00 m. Revisar estación.
-Nauta,9040454,2026-11-15,2026-11-13,7.42,12.279,-4.859,7.42,0.0,2,Sí,Offset alto: -4.86 m. Revisar estación.
-Genaro Herrera,9042214,2026-11-15,2026-11-13,9.25,10.768,-1.518,9.25,0.0,2,Sí,Offset alto: -1.52 m. Revisar estación.
-Angamos,9043370,2026-11-15,2026-11-13,1.32,15.891,-14.571,1.32,0.0,2,Sí,Offset alto: -14.57 m. Revisar estación.
-Requena,9043425,2026-11-15,2026-11-13,8.16,12.29,-4.13,8.16,0.0,2,Sí,Offset alto: -4.13 m. Revisar estación.
-Lagunas,9043597,2026-11-15,2026-11-13,6.8,9.259,-2.459,6.8,0.0,2,Sí,Offset alto: -2.46 m. Revisar estación.
-Yurimaguas,9046779,2026-11-15,2026-11-11,130.71,134.099,-3.389,130.71,0.0,4,Sí,Offset alto: -3.39 m. Revisar estación.
-Contamana,9053555,2026-11-15,2026-11-13,8.66,11.025,-2.365,8.66,0.0,2,Sí,Offset alto: -2.36 m. Revisar estación.
+Santa Clotilde,9032282,2026-11-16,2026-11-13,6.47,9.478,-3.008,6.47,0.0,3,Sí,Offset alto: -3.01 m. Revisar estación.
+Bellavista,9036028,2026-11-16,2026-11-13,3.58,4.95,-1.37,3.58,0.0,3,Sí,Ajuste aplicado
+Timicurillo,9036459,2026-11-16,2026-11-12,7.87,13.079,-5.209,7.87,0.0,4,Sí,Offset alto: -5.21 m. Revisar estación.
+Puerto Almendra,9037610,2026-11-16,2026-11-13,3.52,7.412,-3.892,3.52,0.0,3,Sí,Offset alto: -3.89 m. Revisar estación.
+Santa María de Nanay,9037738,2026-11-16,2026-11-13,3.84,7.78,-3.94,3.84,0.0,3,Sí,Offset alto: -3.94 m. Revisar estación.
+ENAPU,9038134,2026-11-16,2026-11-13,5.58,7.45,-1.87,5.58,0.0,3,Sí,Offset alto: -1.87 m. Revisar estación.
+Tamshiyacu,9038269,2026-11-16,2026-11-13,3.3,8.035,-4.735,3.3,0.0,3,Sí,Offset alto: -4.74 m. Revisar estación.
+Puerto Alegria,9038835,2026-11-16,2026-11-13,10.92,16.559,-5.639,10.92,0.0,3,Sí,Offset alto: -5.64 m. Revisar estación.
+Santa Rosa,9039635,2026-11-16,2026-11-13,4.28,9.669,-5.389,4.28,0.0,3,Sí,Offset alto: -5.39 m. Revisar estación.
+Borja,9040208,2026-11-16,2026-11-13,4.4,6.975,-2.575,4.4,0.0,3,Sí,Offset alto: -2.57 m. Revisar estación.
+San Regis,9040439,2026-11-16,2026-11-16,5.947,8.335,-2.388,5.947,0.0,0,Sí,Offset alto: -2.39 m. Revisar estación.
+Nauta,9040454,2026-11-16,2026-11-13,7.42,12.279,-4.859,7.42,0.0,3,Sí,Offset alto: -4.86 m. Revisar estación.
+Genaro Herrera,9042214,2026-11-16,2026-11-13,9.25,10.973,-1.723,9.25,0.0,3,Sí,Offset alto: -1.72 m. Revisar estación.
+Angamos,9043370,2026-11-16,2026-11-13,1.32,16.278,-14.958,1.32,0.0,3,Sí,Offset alto: -14.96 m. Revisar estación.
+Requena,9043425,2026-11-16,2026-11-13,8.16,12.563,-4.403,8.16,0.0,3,Sí,Offset alto: -4.40 m. Revisar estación.
+Lagunas,9043597,2026-11-16,2026-11-13,6.8,9.246,-2.446,6.8,0.0,3,Sí,Offset alto: -2.45 m. Revisar estación.
+Yurimaguas,9046779,2026-11-16,2026-11-11,130.71,133.988,-3.278,130.71,0.0,5,Sí,Offset alto: -3.28 m. Revisar estación.
+Contamana,9053555,2026-11-16,2026-11-13,8.66,11.047,-2.387,8.66,0.0,3,Sí,Offset alto: -2.39 m. Revisar estación.
